@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Secrets ---
+.env
+*.key
+
+# --- Data (lives on shared Drive, never in git) ---
+data/
+datasets/
+raw/
+recordings/
+
+# --- Model weights & training outputs (private HF Hub) ---
+checkpoints/
+outputs/
+runs/
+wandb/
+lightning_logs/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.bin
+*.onnx
+*.tflite
+
+# --- Media (privacy: no faces or voices in git) ---
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.opus
+*.ogg
+*.npy
+*.npz
+
+# --- OS / editors ---
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,11 @@
+# Starter dependencies. Pin versions once the week-1 baseline runs.
+torch
+torchaudio
+numpy
+opencv-python
+mediapipe
+librosa
+soundfile
+transformers
+peft
+jiwer
