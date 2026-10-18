@@ -110,10 +110,11 @@ def build_data(cfg: Config):
         return vocab, train_loader, val_loader
     vocab = CharVocab()
     modes = d.get("modes")
+    units = d.get("load_units", False)
     train = AVManifestDataset(
-        d.train_manifest, vocab, VideoAugment(train=True), max_frames=d.get("max_frames", 500), modes=modes
+        d.train_manifest, vocab, VideoAugment(train=True), units, d.get("max_frames", 500), modes
     )
-    val = AVManifestDataset(d.val_manifest, vocab, VideoAugment(train=False), modes=modes)
+    val = AVManifestDataset(d.val_manifest, vocab, VideoAugment(train=False), units, modes=modes)
     sampler = DynamicBatchSampler(
         [train.num_frames(i) for i in range(len(train))], d.get("max_frames_per_batch", 2000)
     )

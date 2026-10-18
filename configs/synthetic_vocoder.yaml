@@ -1,0 +1,18 @@
+# Unit vocoder on the toy world (letter ids -> harmonic tones). CPU smoke run.
+device: cpu
+data:
+  kind: synthetic
+  train_samples: 128
+  segment_units: 28      # 28 units x 320 = 8960 samples (0.56 s), as in speech-resynthesis
+  batch_size: 8
+model:
+  size: tiny
+  num_units: 20          # synthetic letter ids fit in 20
+  speaker_dim: 0
+  mel_weight: 45.0
+train:
+  lr: 1.0e-3
+  max_steps: 200
+  log_every: 50
+  eval_every: 100
+  out_dir: outputs/synthetic_vocoder

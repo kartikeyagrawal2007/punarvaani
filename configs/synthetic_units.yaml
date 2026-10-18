@@ -1,0 +1,14 @@
+# Path B on the toy world: lips -> 50 Hz units + mel (+ aux CTC).
+_base_: synthetic_vsr.yaml
+model:
+  encoder_preset: tiny
+  hidden: 64
+  predict_mel: true
+  aux_ctc: true
+init:
+  encoder_from: null   # e.g. outputs/synthetic_vsr/best.pt to reuse the Path A encoder
+train:
+  lr: 3.0e-3
+  max_steps: 300
+  eval_every: 100
+  out_dir: outputs/synthetic_units
