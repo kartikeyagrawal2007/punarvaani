@@ -128,3 +128,23 @@ def test_text_fallback_matches_on_visemes():
     bank = PhraseBank(PHRASES, CharVocab())
     # "बानी" / "भुझे" are lip-reading confusions of पानी / मुझे
     assert bank.match_text("भुझे बानी चाहिए")[0][0] == "मुझे पानी चाहिए"
+
+
+def test_cached_tts_and_pipeline_smoke(tmp_path):
+    from punarvaani.models.path_a.pipeline import PathAPipeline
+    from punarvaani.models.path_a.tts import CachedTTS, ToneTTS
+
+    vocab = CharVocab()
+    torch.manual_seed(0)
+    model = VSRModel(
+        VisualSpeechEncoder(EncoderConfig.preset("tiny")), len(vocab), decoder_layers=1, decoder_ffn=64
+    )
+    tts = CachedTTS(ToneTTS(), tmp_path)
+    assert tts.prerender(PHRASES) == len(PHRASES)
+    assert torch.equal(CachedTTS(ToneTTS(), tmp_path).synthesize(PHRASES[0]), tts.synthesize(PHRASES[0]))
+
+    pipe = PathAPipeline(model, vocab, PhraseBank(PHRASES, vocab), tts=tts, beam=3)
+    res = pipe.recognize(torch.randn(30, 44, 44))
+    assert res.mode in ("phrase", "open") and "total" in res.timings_ms
+    strict = PathAPipeline(model, vocab, PhraseBank(PHRASES, vocab), mode="phrase")
+    assert strict.recognize(torch.randn(30, 44, 44)).mode in ("phrase", "rejected")
