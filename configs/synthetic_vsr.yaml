@@ -1,0 +1,22 @@
+# Toy lip world on CPU: proves the whole Path A training stack learns.
+# python -m punarvaani.training.train_vsr --config configs/synthetic_vsr.yaml
+device: cpu
+data:
+  kind: synthetic
+  size: 44            # mouth crop size (real data: 88)
+  noise: 0.05
+  train_samples: 512
+  val_samples: 64
+  batch_size: 16
+model:
+  encoder_preset: tiny
+  decoder_layers: 1
+  decoder_ffn: 128
+  ctc_weight: 0.5
+train:
+  lr: 3.0e-3
+  warmup_steps: 40
+  max_steps: 400
+  log_every: 25
+  eval_every: 100
+  out_dir: outputs/synthetic_vsr

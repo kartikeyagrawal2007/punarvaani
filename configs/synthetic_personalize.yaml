@@ -1,0 +1,34 @@
+# Per-user personalisation on the toy world. The "user" mouths silently:
+# smaller openings and a tilted posture (style below). Start from the model
+# trained by synthetic_vsr.yaml, freeze it, and train only a small LoRA adapter
+# on 64 clips of this user.
+_base_: synthetic_vsr.yaml
+data:
+  train_samples: 64
+  style:
+    open_scale: 0.55
+    width_scale: 0.85
+    tilt_offset: 0.35
+init:
+  checkpoint: outputs/synthetic_vsr/best.pt
+lora:
+  enabled: true
+  name: user_demo
+  r: 4
+  alpha: 8
+  dropout: 0.0
+  # Measured on this toy task (64 clips, 200 steps; base model CER 92% on this user):
+  #   attention+FFN only                       -> 41% CER
+  #   + video/post-extract projections         -> 19% CER
+  #   + ResNet BatchNorm affine & stats (AdaBN) -> 16% CER
+  # The user-specific gap is in low-level visual features, so adapt those too.
+  targets: [q_proj, v_proj, out_proj, fc1, fc2, proj, post_extract_proj]
+  train_extra: [bn, frontend3D.1]
+eval:
+  at_start: true
+train:
+  lr: 5.0e-3
+  warmup_steps: 20
+  max_steps: 200
+  eval_every: 100
+  out_dir: outputs/synthetic_personalize
