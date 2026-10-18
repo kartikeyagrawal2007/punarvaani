@@ -1,11 +1,16 @@
-# Starter dependencies. Pin versions once the week-1 baseline runs.
-torch
-torchaudio
-numpy
-opencv-python
-mediapipe
-librosa
-soundfile
-transformers
-peft
-jiwer
+# Core (CPU is fine for tests and the synthetic demo; use a CUDA build of torch for real training)
+torch>=2.1
+numpy>=1.24
+pyyaml>=6.0
+# Audio
+torchaudio>=2.1
+soundfile>=0.12
+# Vision (lip crop from real video)
+mediapipe>=0.10.14
+opencv-python-headless>=4.8
+# LLM correction (optional)
+anthropic>=0.40
+# Dev
+pytest>=7.4
+ruff>=0.5
+jiwer>=3.0

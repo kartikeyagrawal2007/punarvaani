@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "punarvaani"
+version = "0.1.0"
+description = "Hindi lip-to-speech that restores a patient's own voice from silent lip movements"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.1",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Lip cropping from real video (MediaPipe Tasks FaceLandmarker + OpenCV)
+vision = ["mediapipe>=0.10.14", "opencv-python-headless>=4.8"]
+# Real audio I/O and resampling
+audio = ["torchaudio>=2.1", "soundfile>=0.12"]
+# LLM correction via the Claude API
+llm = ["anthropic>=0.40"]
+dev = ["pytest>=7.4", "ruff>=0.5", "jiwer>=3.0"]
+
+[project.scripts]
+punarvaani = "punarvaani.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["punarvaani*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: trains a tiny model for a few hundred steps (deselect with -m 'not slow')"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B905"]
