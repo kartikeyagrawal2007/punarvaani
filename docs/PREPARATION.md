@@ -60,8 +60,8 @@ The order is designed to convince: **problem → why now → what we already bui
 ### 3:00–6:00 · What Punarvaani does, and what we already built (3 min)
 - A phone camera watches the lips. The system speaks for the person **in Hindi**, **in their own voice**, rebuilt from old WhatsApp voice notes and family videos.
 - Two ways of producing speech:
-  - **Path A:** lips → Hindi text → corrected by an AI language model → spoken in the cloned voice. Reliable.
-  - **Path B:** lips → speech sounds directly → voice. More natural rhythm and emotion. This is the research contribution.
+  - **Path A:** lips → lips → Hindi text → LLM correction using the person’s context → an Indian-language text-to-speech model (IndicF5) that clones their voice. (Reliable)
+  - **Path B:** lips → speech tokens → a vocoder that speaks in their voice. It keeps rhythm and intonation and never goes through text. More natural rhythm and emotion. This is the research contribution.
 - **Phrase mode** as a safety net: the patient's 200–500 everyday phrases ("मुझे पानी चाहिए", "दर्द हो रहा है") are recognised with high reliability. If unsure, it stays silent rather than saying the wrong thing.
 - **Already done** (this is the strongest point; say it confidently):
   - the complete pipeline is coded and tested (82 automated tests);
