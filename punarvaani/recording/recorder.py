@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+import zlib
 from pathlib import Path
 
 from punarvaani.recording.prompts import load_phrases, plan_session
@@ -38,7 +39,9 @@ def main(argv=None) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     sentences = load_phrases(args.sentences) if args.sentences else []
-    prompts = plan_session(load_phrases(args.phrases), sentences, seed=hash(args.participant) % 1000)
+    prompts = plan_session(
+        load_phrases(args.phrases), sentences, seed=zlib.crc32(args.participant.encode())
+    )  # stable across runs (resume)
     done_file = out / "takes.jsonl"
     done = (
         {json.loads(line)["index"] for line in done_file.open(encoding="utf-8")}
