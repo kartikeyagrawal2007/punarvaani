@@ -22,7 +22,7 @@ vision = ["mediapipe>=0.10.14", "opencv-python-headless>=4.8"]
 audio = ["torchaudio>=2.1", "soundfile>=0.12"]
 # LLM correction via the Claude API
 llm = ["anthropic>=0.40"]
-dev = ["pytest>=7.4", "ruff>=0.5", "jiwer>=3.0"]
+dev = ["pytest>=7.4", "ruff==0.17.1", "jiwer>=3.0"]
 
 [project.scripts]
 punarvaani = "punarvaani.cli:main"
@@ -41,3 +41,8 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501", "B905"]
+
+[tool.ruff.lint.isort]
+# Explicit, so import sorting is the same on every machine (in CI ruff
+# otherwise treated the package as third-party and grouped it with torch).
+known-first-party = ["punarvaani"]

@@ -12,5 +12,5 @@ opencv-python-headless>=4.8
 anthropic>=0.40
 # Dev
 pytest>=7.4
-ruff>=0.5
+ruff==0.17.1
 jiwer>=3.0
