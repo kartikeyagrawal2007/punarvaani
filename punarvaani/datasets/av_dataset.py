@@ -44,7 +44,9 @@ def read_manifest(path: str | Path) -> list[dict]:
 def write_manifest(rows: Sequence[dict], path: str | Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for r in rows:
-            f.write(json.dumps({k: v for k, v in r.items() if not k.startswith("_")}, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps({k: v for k, v in r.items() if not k.startswith("_")}, ensure_ascii=False) + "\n"
+            )
 
 
 @dataclass
@@ -102,7 +104,12 @@ class AVManifestDataset(Dataset):
         row = self.rows[i]
         video = np.load(self._path(row, "video"))
         video = normalize_video(torch.from_numpy(self.augment(video)))
-        item = {"id": row["id"], "video": video, "text": row.get("text", ""), "mode": row.get("mode", "spoken")}
+        item = {
+            "id": row["id"],
+            "video": video,
+            "text": row.get("text", ""),
+            "mode": row.get("mode", "spoken"),
+        }
         if row.get("text"):
             item["tokens"] = torch.tensor(self.vocab.encode(row["text"]), dtype=torch.long)
         if self.load_units and "units" in row:

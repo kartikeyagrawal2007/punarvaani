@@ -35,18 +35,26 @@ DEFAULT_ALPHABET = "कमलपनसतरगद"
 DEFAULT_WORDS = ("कमल", "पतन", "नल", "सरस", "मन", "दल", "गगन", "तरल", "पद", "नगर", "सपन", "मगर")
 
 
-def _shape_params(alphabet: str, confusable: Sequence[tuple[str, str]] = ()) -> dict[str, tuple[float, float, float]]:
+def _shape_params(
+    alphabet: str, confusable: Sequence[tuple[str, str]] = ()
+) -> dict[str, tuple[float, float, float]]:
     params = {}
     n = len(alphabet)
     for i, ch in enumerate(alphabet):
         a = 2 * math.pi * i / n
-        params[ch] = (0.15 + 0.3 * (0.5 + 0.5 * math.sin(a)), 0.25 + 0.2 * (0.5 + 0.5 * math.cos(a)), 0.25 * math.sin(2 * a))
+        params[ch] = (
+            0.15 + 0.3 * (0.5 + 0.5 * math.sin(a)),
+            0.25 + 0.2 * (0.5 + 0.5 * math.cos(a)),
+            0.25 * math.sin(2 * a),
+        )
     for a, b in confusable:
         params[b] = params[a]
     return params
 
 
-def render_mouth(height: float, width: float, tilt: float, size: int, rng: np.random.Generator, noise: float) -> np.ndarray:
+def render_mouth(
+    height: float, width: float, tilt: float, size: int, rng: np.random.Generator, noise: float
+) -> np.ndarray:
     ys, xs = np.mgrid[0:size, 0:size].astype(np.float32) / size - 0.5
     xs = xs + rng.normal(0, 0.01)
     ys = ys + rng.normal(0, 0.01)
