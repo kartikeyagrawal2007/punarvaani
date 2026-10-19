@@ -138,6 +138,8 @@ The full code base for every stage is implemented and tested on CPU (80+ tests).
 
 **New to the project? Read [`docs/LEARNING_GUIDE.md`](docs/LEARNING_GUIDE.md):** every component, every design decision, the background knowledge, and interview Q&A.
 
+**What's next:** [`docs/ROADMAP.md`](docs/ROADMAP.md) has the phase-by-phase checklist with owners, exit criteria and risks.
+
 ## Repository structure
 
 ```
