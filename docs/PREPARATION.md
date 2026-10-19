@@ -4,13 +4,14 @@
 
 **Call:** tomorrow, 12:30 PM (he travels in the evening, so keep it to ~20 minutes).
 
-This file has five parts:
+This file has six parts:
 
 1. [Team meeting before the call](#1-team-meeting-before-the-call): decide these first
 2. [Call flow](#2-call-flow-what-to-say-in-what-order): what to say, in what order, with talking points
 3. [Slide deck outline](#3-slide-deck-outline): 12 slides you can turn into a PPT directly
 4. [Questions he may ask](#4-questions-he-may-ask-and-answers), the ICMR facts and the proposal timeline
 5. [Libraries, models and tools](#5-libraries-models-and-tools): what we use at each stage and what each one lets us do
+6. [Related work, the real gap and our research question](#6-related-work-the-real-gap-and-our-research-question): what already exists (including English), why we focus on Indian languages, and the open-ended question
 
 ---
 
@@ -148,7 +149,7 @@ Then thank him and confirm who sends what, and by when.
 - Own voice from noisy old recordings
 - Works on silent mouthing (all datasets are spoken aloud)
 - Phone camera only, real time
-- *Notes:* this slide answers ICMR's first selection question directly.
+- *Notes:* this slide answers ICMR's first selection question directly. Section 6 has the related-work table and the research question.
 
 ### Slide 6 · What's already built
 - Complete pipeline coded and tested: 25+ commits, 82 automated tests, CI
@@ -279,6 +280,63 @@ Worth mentioning: it shows depth, and it gives us full control.
 **One-liner for the call:** *"We build on proven open models from Meta, Google and AI4Bharat, adapt them to Hindi and to each patient with small add-on layers, and wrote the parts specific to lip-to-speech ourselves."*
 
 **If asked about licences:** AV-HuBERT is licensed for non-commercial research only, which is fine for a research grant. For a later product stage we would replace or retrain it. Check each other model's licence on its model card before the final proposal.
+
+---
+
+## 6. Related work, the real gap and our research question
+
+Use this when someone asks *"Hasn't this already been done, at least in English?"* It is also the "first in the world" argument for ICMR.
+
+### What already exists
+
+| What exists | Examples | What it does | What it does **not** do |
+|---|---|---|---|
+| English lip-to-speech research | Lip2Wav (2020), lip2speech-unit (2023), LipVoicer (2024) | Turns lip videos into speech in research settings | Trained on people **speaking aloud**; outputs a generic or dataset voice, not the patient's own; English only; lab demos, not patient tools |
+| English lip reading (lips → text) | Meta's AV-HuBERT on the LRS3 dataset | Reads English text from lip videos | No speech output; no Indian languages |
+| Phrase-level patient apps | e.g. SRAVI by Liopa (UK), for ICU patients | Recognised a small set of English phrases | Phrase-only; not in the patient's own voice; English only |
+| Voice banking | Recording one's voice before surgery | Patient-specific synthetic voice | Must be done **before** surgery; few patients do it (in one study only 7 of 30 used it) |
+| Silent-speech interfaces | EMG sensors on the face/neck | Detect speech from muscle signals | Needs sensors on the face; impractical for daily use |
+| Indian-language resources | vVISWa (Hindi/Marathi), IndicF5, IndicWhisper | Small word-level lip data; Indian TTS and ASR | No large Hindi lip-reading dataset; no Indian lip-to-speech system |
+
+*Check the current status and exact details of each item in a proper literature search before the proposal; ICMR will verify the novelty claim.*
+
+### The real gap
+
+Each piece exists somewhere. **No system combines them, in any language:**
+
+> Silent lip movements → phone camera only → speech in the patient's **own voice rebuilt from old recordings** → personalised to that patient → in **Indian languages** → with a phrase-mode safety net.
+
+### Why Indian languages and not English
+
+1. **Novelty is clear.** In English, reviewers can point to Lip2Wav and LipVoicer. For Hindi and other Indian languages there is no large lip-reading dataset or lip-to-speech system at all.
+2. **The patients are here.** India has one of the highest burdens of oral and throat cancer; an English-only tool does not help most of them.
+3. **The funder is Indian.** ICMR prioritises impact on Indian health.
+4. **The dataset is a contribution in itself.** The first Hindi lip-reading dataset is a research output on its own.
+5. **We build on the English work instead of repeating it.** AV-HuBERT, pretrained on English, is our starting point.
+
+### Our novelty, in five points
+
+1. First **Indian-language** lip-to-speech system, with the first large **Hindi lip-reading dataset** (built with our data engine).
+2. **Silent mouthing**: we measure and close the gap between speaking aloud and silent mouthing; existing datasets only contain spoken speech.
+3. **Voice from scraps**: the patient's own voice rebuilt from noisy WhatsApp notes and family videos, separating it from relatives' voices.
+4. **Personalisation from minutes**: a per-patient adapter from 10–15 minutes of video.
+5. **Safe by design**: phrase mode with rejection plus LLM context correction, so the system stays silent rather than saying the wrong thing.
+
+### The research question
+
+**Open-ended question:**
+> *How can a person who has lost their voice speak again, naturally, in their own language and in their own voice, using only a smartphone camera, a few minutes of their silent lip movements, and whatever old voice recordings their family has?*
+
+**Sub-questions (each can be a paper section):**
+1. **Cross-lingual transfer:** how far can an English-pretrained visual speech model be adapted to Hindi with 50–100 hours of automatically mined video?
+2. **Silent mouthing:** how much does accuracy drop when lips move without sound, and can a few minutes of a person's silent mouthing recover it?
+3. **Voice from scraps:** how faithfully can a person's voice be rebuilt from 1–3 minutes of noisy, compressed archival audio, judged by speaker similarity and by their family?
+4. **Context:** can a language model that knows the patient's situation correct errors between sounds that look identical on the lips?
+5. **Practicality:** can the whole pipeline respond in under one second using only a phone camera?
+6. **Scale:** how much new data does each additional Indian language need once Hindi works?
+
+**One-liner for the call:**
+> "English lip-to-speech exists as research, but only for people speaking aloud and in generic voices. No system restores a patient's own voice from silent lip movements in any Indian language. That is our gap, and we build on the English models rather than repeat them."
 
 ---
 
