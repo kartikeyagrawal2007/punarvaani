@@ -1,0 +1,22 @@
+# Weeks 11-12: Path B lips -> mHuBERT-147 units (K=1000) + mel + pitch.
+# Units: extract with punarvaani.models.path_b.units.HuBERTUnitExtractor and add "units" to the manifests.
+_base_: hindi_adapt.yaml
+data:
+  load_units: true
+model:
+  num_units: 1000
+  hidden: 512
+  predict_mel: true
+  predict_pitch: false    # needs "pitch" targets in the manifest (preprocessing/pitch.py)
+  aux_ctc: true
+  ctc_weight: 0.1
+init:
+  encoder_from: outputs/hindi_adapt/merged.pt   # Hindi-adapted encoder with LoRA folded in
+lora:
+  enabled: false
+freeze:
+  frontend: true
+train:
+  lr: 2.0e-4
+  max_steps: 30000
+  out_dir: outputs/path_b_units

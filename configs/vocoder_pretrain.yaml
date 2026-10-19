@@ -1,0 +1,19 @@
+# Multi-speaker unit HiFi-GAN on the mined Hindi audio (units + ECAPA embeddings).
+data:
+  kind: manifest
+  train_manifest: data/hindi_av/train.jsonl   # needs "units", "audio", "speaker_embedding"
+  val_manifest: data/hindi_av/val.jsonl
+  segment_units: 28
+  batch_size: 16
+model:
+  size: full
+  num_units: 1000
+  speaker_dim: 192
+  mel_weight: 45.0
+train:
+  lr: 2.0e-4
+  lr_decay: 0.99995
+  max_steps: 400000
+  log_every: 200
+  eval_every: 5000
+  out_dir: outputs/vocoder_pretrain

@@ -1,0 +1,32 @@
+# Weeks 9-10: per-user adapter on 10-15 min of the user's SILENT mouthing.
+# Base = Hindi-adapted model; its 'hindi' adapter is loaded frozen; only 'user_<id>' trains.
+# python -m punarvaani.training.train_vsr --config configs/personalize.yaml lora.name=user_P07 \
+#        data.train_manifest=data/users/P07/train.jsonl data.val_manifest=data/users/P07/val.jsonl
+_base_: hindi_adapt.yaml
+data:
+  modes: [silent]            # set [silent, spoken] to also use the spoken takes
+  max_frames_per_batch: 1500
+init:
+  checkpoint: outputs/hindi_adapt/best.pt
+  adapters: [outputs/hindi_adapt/adapter_hindi.pt]
+model:
+  encoder_overrides:
+    mask_prob: 0.2
+lora:
+  name: user_demo
+  r: 8
+  alpha: 16
+  dropout: 0.1
+  # Toy experiment: the user gap lives in low-level visual features, so also adapt
+  # the feature projections and the ResNet BatchNorm (see synthetic_personalize.yaml).
+  targets: [q_proj, v_proj, out_proj, fc1, fc2, proj, post_extract_proj]
+  train_extra: [bn, frontend3D.1, ctc_head]
+eval:
+  at_start: true             # logs the silent-mouthing gap before adaptation
+train:
+  lr: 1.0e-3
+  warmup_steps: 100
+  max_steps: 3000
+  eval_every: 250
+  save_trainable_only: true  # a few MB per user
+  out_dir: outputs/personalize
