@@ -27,7 +27,13 @@ from punarvaani.datasets.av_dataset import AVManifestDataset, DynamicBatchSample
 from punarvaani.datasets.synthetic import SyntheticLipDataset
 from punarvaani.eval.metrics import cer, wer
 from punarvaani.models.encoder.avhubert import EncoderConfig, VisualSpeechEncoder, load_fairseq_checkpoint
-from punarvaani.models.encoder.lora import inject_lora, load_adapter, mark_trainable, save_adapter
+from punarvaani.models.encoder.lora import (
+    inject_lora,
+    load_adapter,
+    mark_trainable,
+    merge_and_unload,
+    save_adapter,
+)
 from punarvaani.models.path_a.decoding import ctc_greedy
 from punarvaani.models.path_a.model import VSRModel
 from punarvaani.text.vocab import CharVocab
@@ -183,6 +189,11 @@ def main(argv=None) -> dict:
                      meta={"config": cfg.to_dict()})  # fmt: skip
     final = trainer.evaluate()
     log.info("final %s", final)
+    if lora.get("enabled") and not tcfg.save_trainable_only:
+        # Best weights with all adapters folded in: plain module names, loadable by Path B.
+        best = torch.load(out_dir / "best.pt", map_location="cpu", weights_only=False)["model"]
+        model.load_state_dict(best, strict=False)
+        torch.save({"model": merge_and_unload(model).state_dict()}, out_dir / "merged.pt")
     return {"initial": initial, "final": final, "best": trainer.best, "history": trainer.history}
 
 

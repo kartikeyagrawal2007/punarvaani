@@ -37,3 +37,19 @@ def test_cli_dispatches_training(tmp_path):
     cli.main(["train-vsr", "--config", "configs/synthetic_vsr.yaml", "train.max_steps=1", "train.eval_every=1",
               "data.train_samples=4", "data.val_samples=4", f"train.out_dir={tmp_path}"])  # fmt: skip
     assert (tmp_path / "last.pt").exists()
+
+
+def test_path_b_can_start_from_merged_path_a_encoder(tmp_path):
+    from punarvaani.training import train_units
+
+    base = tmp_path / "base"
+    train_vsr.main(["--config", "configs/synthetic_vsr.yaml", "train.max_steps=1", "train.eval_every=1",
+                    "data.train_samples=4", "data.val_samples=4", f"train.out_dir={base}"])  # fmt: skip
+    pers = tmp_path / "pers"
+    train_vsr.main(["--config", "configs/synthetic_personalize.yaml", "train.max_steps=1", "train.eval_every=1",
+                    "data.train_samples=4", "data.val_samples=4", f"init.checkpoint={base / 'best.pt'}",
+                    f"train.out_dir={pers}"])  # fmt: skip
+    assert (pers / "merged.pt").exists()
+    train_units.main(["--config", "configs/synthetic_units.yaml", "train.max_steps=1", "train.eval_every=1",
+                      "data.train_samples=4", "data.val_samples=4", f"init.encoder_from={pers / 'merged.pt'}",
+                      f"train.out_dir={tmp_path / 'units'}"])  # fmt: skip

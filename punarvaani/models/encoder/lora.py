@@ -198,3 +198,19 @@ def load_adapter(model: nn.Module, path: str | Path, activate: bool = True) -> s
         if not activate:
             m.active.remove(name)
     return name
+
+
+def merge_and_unload(model: nn.Module) -> nn.Module:
+    """Fold every active adapter into its base weight and replace LoRA wrappers by plain ``nn.Linear``.
+
+    The result has exactly the original module names (``q_proj.weight``), so it
+    loads anywhere a non-LoRA model does - e.g. Path B starting from the
+    Hindi-adapted Path A encoder - and runs with zero adapter overhead.
+    """
+    for name, module in list(_lora_modules(model)):
+        for adapter in module.active:
+            module.merge(adapter)
+        parent_name, _, child = name.rpartition(".")
+        parent = model.get_submodule(parent_name) if parent_name else model
+        setattr(parent, child, module.base)
+    return model

@@ -98,3 +98,19 @@ def test_fairseq_checkpoint_conversion(tmp_path):
     report = load_fairseq_checkpoint(enc, tmp_path / "fake_avhubert.pt")
     assert report["missing"] == [] and report["unexpected"] == []
     assert torch.allclose(enc.post_extract_proj.weight, ours["post_extract_proj.weight"])  # +1 applied
+
+
+def test_merge_and_unload_restores_plain_names():
+    from punarvaani.models.encoder.lora import merge_and_unload
+
+    enc = tiny_encoder()
+    plain_keys = set(enc.state_dict())
+    inject_lora(enc, "hindi", r=4, alpha=8)
+    for name, p in enc.named_parameters():
+        if "lora_B" in name:
+            p.data.normal_(0, 0.1)
+    x = torch.randn(1, 10, 44, 44)
+    ref = enc(x)
+    merge_and_unload(enc)
+    assert set(enc.state_dict()) == plain_keys
+    assert torch.allclose(enc(x), ref, atol=1e-5)

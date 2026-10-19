@@ -1,0 +1,13 @@
+# Fine-tune the vocoder on ONE patient's cleaned voice notes (audio only; no video needed).
+_base_: vocoder_pretrain.yaml
+data:
+  train_manifest: data/users/P07/voice_notes.jsonl   # from `punarvaani rebuild-voice` segments + units
+  val_manifest: data/users/P07/voice_notes_val.jsonl
+  batch_size: 8
+init:
+  checkpoint: outputs/vocoder_pretrain/vocoder.pt
+train:
+  lr: 5.0e-5
+  max_steps: 5000
+  eval_every: 500
+  out_dir: outputs/vocoder_P07

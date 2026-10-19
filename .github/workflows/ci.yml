@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install (CPU torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]" opencv-python-headless
+      - name: Lint
+        run: |
+          ruff check punarvaani tests
+          ruff format --check punarvaani tests
+      - name: Fast tests
+        run: pytest -q -m "not slow"
+      - name: Learning test (tiny model on synthetic data)
+        run: pytest -q -m slow
