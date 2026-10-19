@@ -150,13 +150,19 @@ def frame_energy_db(wav: torch.Tensor, frame: int = 400, hop: int = HOP_LENGTH) 
     return 10 * torch.log10(frames.pow(2).mean(-1).clamp(min=1e-10))
 
 
-def energy_vad(
-    wav: torch.Tensor, threshold_db: float = -40.0, relative_db: float = 30.0, min_speech_ms: int = 200
-) -> torch.Tensor:
-    """Boolean speech mask at 100 Hz: frames louder than both an absolute floor
-    and ``relative_db`` below the loudest frame. Short blips are removed."""
+def energy_vad(wav: torch.Tensor, threshold_db: float = -40.0, relative_db: float = 30.0, min_speech_ms: int = 200,
+               noise_margin_db: float = 6.0) -> torch.Tensor:  # fmt: skip
+    """Boolean speech mask at 100 Hz.
+
+    A frame is speech if it is louder than (a) an absolute floor, (b) the noise
+    floor (10th percentile frame energy) plus ``noise_margin_db``, and (c)
+    ``relative_db`` below the loudest frame. (b) is what makes it work on
+    voice notes with steady background noise (fans, traffic). Short blips are
+    removed.
+    """
     e = frame_energy_db(wav)
-    speech = (e > threshold_db) & (e > e.max() - relative_db)
+    floor = torch.quantile(e, 0.1)
+    speech = (e > threshold_db) & (e > floor + noise_margin_db) & (e > e.max() - relative_db)
     min_frames = max(1, min_speech_ms // 10)
     out = speech.clone()
     start = None
