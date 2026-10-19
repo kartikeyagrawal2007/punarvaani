@@ -130,7 +130,7 @@ The full code base for every stage is implemented and tested on CPU (80+ tests).
 | LLM correction (Claude) + offline fallback | ✅ `llm_correction.py` | mocked API, viseme confusions fixed offline |
 | Per-user personalisation | ✅ `configs/personalize.yaml` | synthetic "silent" user: 92% → 15.5% CER with 64 clips |
 | Voice rebuilding (denoise, ECAPA, speaker clustering) | ✅ `voice_rebuild/` | relatives' voices excluded |
-| Path B: lips → units/mel/pitch, unit HiFi-GAN | ✅ `models/path_b/` | 100% unit accuracy; vocoder mel L1 1.18 → 0.68 |
+| Path B: lips → units/mel/pitch, unit HiFi-GAN | ✅ `models/path_b/` | 100% unit accuracy; vocoder val mel L1 0.98 → 0.68 |
 | Hybrid A+B (CTC-guided units) | ✅ `models/hybrid/` | CTC 7.0 → 0.1 nats, 10% of frames edited |
 | Real-time streaming | ✅ `app/` | end-pointing + chunked streaming tests |
 | Evaluation (WER/CER/VER, bootstrap, MOS, EER, latency) | ✅ `eval/` | checked against jiwer |

@@ -6,7 +6,7 @@ learned from audio": they capture *what* is said and *how it's timed*, but
 mostly not *who* says it - speaker identity is added back by the vocoder. So
 predicting units from lips turns a hard regression (video -> waveform) into a
 classification problem per 20 ms frame, which is far easier to train and gives
-intelligible speech (Kim et al., Interspeech 2023 "lip2speech-unit").
+intelligible speech (Choi, Kim & Ro, Interspeech 2023, "lip2speech-unit").
 
 Heads on top of the shared visual encoder (25 Hz):
 
