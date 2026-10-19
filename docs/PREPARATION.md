@@ -4,12 +4,13 @@
 
 **Call:** tomorrow, 12:30 PM (he travels in the evening, so keep it to ~20 minutes).
 
-This file has four parts:
+This file has five parts:
 
 1. [Team meeting before the call](#1-team-meeting-before-the-call): decide these first
 2. [Call flow](#2-call-flow-what-to-say-in-what-order): what to say, in what order, with talking points
 3. [Slide deck outline](#3-slide-deck-outline): 12 slides you can turn into a PPT directly
 4. [Questions he may ask](#4-questions-he-may-ask-and-answers), the ICMR facts and the proposal timeline
+5. [Libraries, models and tools](#5-libraries-models-and-tools): what we use at each stage and what each one lets us do
 
 ---
 
@@ -139,7 +140,7 @@ Then thank him and confirm who sends what, and by when.
 - **Path A:** lips → text → AI correction → cloned voice (reliable)
 - **Path B:** lips → speech sounds → voice (natural)
 - **Phrase mode:** everyday phrases, high reliability, stays silent when unsure
-- *Notes:* use the diagram from the README; don't go deep on the technology unless asked.
+- *Notes:* use the diagram from the README; don't go deep on the technology unless asked. Section 5 has the libraries and models for a backup slide.
 
 ### Slide 5 · Why it's first in the world
 - Indian-language lip-to-speech: no large dataset or system exists
@@ -216,6 +217,68 @@ Phase 1: phone camera + laptop/edge GPU, target under 1 second. Later: compresse
 
 **"Why you / is the team capable?"**
 The full pipeline is already built and tested, so we are not starting from zero. The repo and roadmap show the plan in detail.
+
+---
+
+## 5. Libraries, models and tools
+
+What we use at each stage of the architecture, what each one lets us do, and a one-liner you can say if asked. Use this for slide 4 (architecture) or as a backup slide.
+
+### Pretrained models (we adapt these, we don't train them from scratch)
+
+| Model | Stage | What it lets us do | Say it like this |
+|---|---|---|---|
+| **MediaPipe Face Landmarker** (Google) | [1] Lip crop | Finds 478 points on the face in every video frame, in real time, even on a phone | "Google's face-tracking model finds the lips in every frame." |
+| **AV-HuBERT** (Meta) | [2] Lip reading | A model already trained on thousands of hours of video to connect lip movements with speech sounds; we adapt it to Hindi | "We start from Meta's lip-reading model instead of training from zero." |
+| **IndicF5** (AI4Bharat) | Path A voice | Text-to-speech for Indian languages that copies a voice from a ~10-second sample (zero-shot voice cloning) | "Speaks in the patient's voice from just a few seconds of an old recording." |
+| **mHuBERT-147** | Path B | A speech model trained on 147 languages, including Hindi; turns audio into "speech sound tokens" every 20 ms | "Turns speech into small sound units that the lip model learns to predict." |
+| **IndicWhisper / Whisper** (AI4Bharat / OpenAI) | Data engine, voice rebuild | Speech-to-text with word timings; transcribes news videos and voice notes automatically | "Automatically writes down what is said, with timings, so we don't label by hand." |
+| **ECAPA-TDNN** weights (SpeechBrain) | Voice rebuild | Makes a "voice fingerprint" so we can tell the patient's voice apart from relatives in family videos | "Recognises whose voice is whose." |
+| **SyncNet** | Data engine | Checks whether lips and sound in a video match in time; filters dubbed or out-of-sync clips | "Throws away videos where the voice doesn't match the lips." |
+| **Claude** (Anthropic) | Path A correction | A large language model that fixes lip-reading mistakes using context (प/ब/म look identical on lips) | "An AI language model fixes look-alike mistakes using context." |
+
+### Python libraries
+
+| Library | What it lets us do | Where we use it |
+|---|---|---|
+| **PyTorch** | The deep-learning framework: build neural networks, train them on GPUs | All models and training |
+| **NumPy** | Fast maths on arrays of numbers | Lip-crop geometry, data processing |
+| **OpenCV** | Read and write video, warp images, use the webcam | Lip crop, recorder, live demo |
+| **MediaPipe** | Runs the face-landmark model | Lip crop |
+| **torchaudio + soundfile** | Load, save and resample audio files | Audio front-end, voice rebuild |
+| **Hugging Face Transformers** | Download and run pretrained models (IndicF5, Whisper, mHuBERT) with a few lines of code | TTS, speech recognition, speech units |
+| **DeepFilterNet** | Removes background noise from speech | Cleaning old voice notes |
+| **anthropic** (SDK) | Calls the Claude API | LLM correction |
+| **PyYAML** | Reads the training config files | All training scripts |
+| **jiwer** | Standard word-error-rate calculation; we use it to double-check our own metric code | Tests |
+| **pytest** | Runs the 82 automated tests | Quality checks |
+| **ruff** | Checks code style and catches common bugs | Quality checks, CI |
+
+### Tools and platforms
+
+| Tool | What it lets us do |
+|---|---|
+| **yt-dlp** | Download public Hindi news and lecture videos for the dataset |
+| **ffmpeg** | Extract and convert audio from videos |
+| **GitHub + GitHub Actions** | Version control; runs the tests automatically on every change (CI) |
+| **Google Colab Pro / Kaggle** | Rented GPUs for training |
+| **Hugging Face Hub (private)** | Stores our trained model checkpoints (never public data) |
+
+### What we built ourselves (no library)
+
+Worth mentioning: it shows depth, and it gives us full control.
+
+| Built ourselves | Why not a library |
+|---|---|
+| **AV-HuBERT re-implementation** in plain PyTorch | Meta's original code (fairseq) is outdated and hard to install; ours loads their weights directly |
+| **LoRA adapters** (small add-on layers for Hindi and per patient) | We needed two adapters at once (Hindi + patient) and swapping between patients |
+| **Phrase mode** and **CTC beam search with a language model** | Our own decision logic, including staying silent when unsure |
+| **HiFi-GAN vocoder**, **ECAPA network**, **YIN pitch tracker**, **k-means** | Adapted to our frame rates and to speaker conditioning |
+| **Hindi text processing** (spelling cleanup, pronunciation rules, look-alike sound groups) | No existing library covers lip-reading look-alikes for Hindi |
+
+**One-liner for the call:** *"We build on proven open models from Meta, Google and AI4Bharat, adapt them to Hindi and to each patient with small add-on layers, and wrote the parts specific to lip-to-speech ourselves."*
+
+**If asked about licences:** AV-HuBERT is licensed for non-commercial research only, which is fine for a research grant. For a later product stage we would replace or retrain it. Check each other model's licence on its model card before the final proposal.
 
 ---
 
