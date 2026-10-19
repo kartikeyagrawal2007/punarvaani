@@ -117,25 +117,53 @@ People who lose their voice to throat or oral cancer surgery (laryngectomy), str
 
 ---
 
+## Status
+
+The full code base for every stage is implemented and tested on CPU (80+ tests). Each model is proven to learn on a synthetic lip-reading world; the real Hindi runs need GPUs, the pretrained weights listed in `third_party/README.md`, and the mined data.
+
+| Stage | Code | Verified on |
+|---|---|---|
+| [1] Lip crop (MediaPipe → stabilised mouth crop) | ✅ `preprocessing/lip_crop.py` | synthetic head motion |
+| Data engine (ASR clips, shot/face checks, A/V sync, splits) | ✅ `data_engine/` | fake components end to end |
+| [2] AV-HuBERT encoder + Hindi/user LoRA | ✅ `models/encoder/` | fairseq key conversion, LoRA merge exactness |
+| Path A: CTC/attention, beam + LM, phrase mode | ✅ `models/path_a/` | synthetic: 0% CER in 400 CPU steps |
+| LLM correction (Claude) + offline fallback | ✅ `llm_correction.py` | mocked API, viseme confusions fixed offline |
+| Per-user personalisation | ✅ `configs/personalize.yaml` | synthetic "silent" user: 92% → 15.5% CER with 64 clips |
+| Voice rebuilding (denoise, ECAPA, speaker clustering) | ✅ `voice_rebuild/` | relatives' voices excluded |
+| Path B: lips → units/mel/pitch, unit HiFi-GAN | ✅ `models/path_b/` | 100% unit accuracy; vocoder mel L1 1.18 → 0.68 |
+| Hybrid A+B (CTC-guided units) | ✅ `models/hybrid/` | CTC 7.0 → 0.1 nats, 10% of frames edited |
+| Real-time streaming | ✅ `app/` | end-pointing + chunked streaming tests |
+| Evaluation (WER/CER/VER, bootstrap, MOS, EER, latency) | ✅ `eval/` | checked against jiwer |
+| **Next:** mine Hindi data, record volunteers, GPU training | ⏳ | — |
+
+**New to the project? Read [`docs/LEARNING_GUIDE.md`](docs/LEARNING_GUIDE.md):** every component, every design decision, the background knowledge, and interview Q&A.
+
 ## Repository structure
 
 ```
 punarvaani/
-├── docs/            # brief, paper notes, architecture diagrams
-├── data_engine/     # Hindi video mining: download, face track, sync check, transcribe, clip
-├── recording/       # tool for volunteers to record silent mouthing
-├── preprocessing/   # MediaPipe lip crop, audio denoise
-├── models/
-│   ├── encoder/     # AV-HuBERT Hindi adaptation + per-user LoRA
-│   ├── path_a/      # lips → text → LLM correction → IndicF5 voice
-│   ├── path_b/      # lips → speech units → vocoder
-│   └── hybrid/      # stretch goal
-├── voice_rebuild/   # voice notes → denoise → speaker embedding
-├── app/             # real-time demo (phone → GPU → audio)
-├── eval/            # WER, speaker similarity, MOS, latency
-├── notebooks/       # Colab / Kaggle experiments
-├── configs/         # training and inference configs
-└── third_party/     # upstream repos (AV-HuBERT, lip2speech-unit) as git submodules
+├── punarvaani/              # the Python package
+│   ├── text/                # Hindi normalisation, character vocab, G2P + schwa deletion, visemes
+│   ├── preprocessing/       # [1] lip crop, audio features, pitch
+│   ├── data_engine/         # Hindi AV mining: clips, sync check, tracking, manifests
+│   ├── datasets/            # manifest dataset, dynamic batching, synthetic lip world
+│   ├── models/
+│   │   ├── encoder/         # [2] AV-HuBERT-style encoder + stackable LoRA
+│   │   ├── path_a/          # lips → text → phrase mode / LLM correction → IndicF5
+│   │   ├── path_b/          # lips → units (+mel, pitch) → unit HiFi-GAN
+│   │   └── hybrid/          # Path A text guides Path B units
+│   ├── voice_rebuild/       # voice notes → denoise → ECAPA → speaker clustering → profile
+│   ├── training/            # trainer + train_vsr / train_units / train_vocoder
+│   ├── eval/                # metrics + evaluation runner
+│   ├── app/                 # real-time streaming + webcam demo
+│   ├── recording/           # volunteer prompts, recorder, consent template
+│   └── cli.py               # `punarvaani ...` entry point
+├── configs/                 # synthetic (CPU) and real (GPU) training recipes, phrase bank
+├── tests/                   # pytest suite (fast + one learning test)
+├── scripts/                 # reproducible experiments
+├── docs/                    # project plan, learning guide
+├── notebooks/               # Colab / Kaggle experiments
+└── third_party/             # where pretrained weights come from
 ```
 
 ## Setup
@@ -144,7 +172,29 @@ punarvaani/
 git clone https://github.com/kartikeyagrawal2007/punarvaani.git
 cd punarvaani
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"                 # core + tests
+pip install -e ".[vision,audio,llm]"    # MediaPipe/OpenCV, audio I/O, Claude API
+```
+
+## Quick start (CPU, no data needed)
+
+```bash
+pytest -q -m "not slow"                       # ~10 s
+punarvaani demo                               # trains a tiny lip reader on synthetic lips, runs Path A
+python scripts/ablation_personalization.py    # the per-user LoRA experiment
+punarvaani train-units --config configs/synthetic_units.yaml
+punarvaani train-vocoder --config configs/synthetic_vocoder.yaml
+```
+
+## Real pipeline (GPU)
+
+```bash
+punarvaani mine --urls sources.txt --out data/hindi_av --face-model face_landmarker.task
+punarvaani train-vsr --config configs/hindi_adapt.yaml
+punarvaani rebuild-voice notes/*.opus --out profiles/P07 --enroll notes/known.opus --ecapa ecapa.pt
+punarvaani train-vsr --config configs/personalize.yaml lora.name=user_P07 data.train_manifest=...
+punarvaani evaluate --run outputs/personalize --manifest data/users/P07/test.jsonl --phrases configs/phrases_hi.txt
+python -m punarvaani.app.realtime --run outputs/personalize --phrases configs/phrases_hi.txt --face-model face_landmarker.task
 ```
 
 ## Data & privacy
