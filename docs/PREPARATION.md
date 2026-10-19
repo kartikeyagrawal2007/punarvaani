@@ -59,9 +59,19 @@ The order is designed to convince: **problem → why now → what we already bui
 
 ### 3:00–6:00 · What Punarvaani does, and what we already built (3 min)
 - A phone camera watches the lips. The system speaks for the person **in Hindi**, **in their own voice**, rebuilt from old WhatsApp voice notes and family videos.
-- Two ways of producing speech:
-  - **Path A:** lips → lips → Hindi text → LLM correction using the person’s context → an Indian-language text-to-speech model (IndicF5) that clones their voice. (Reliable)
-  - **Path B:** lips → speech tokens → a vocoder that speaks in their voice. It keeps rhythm and intonation and never goes through text. More natural rhythm and emotion. This is the research contribution.
+- Both paths start the same way: the phone camera tracks the lips, and our lip-reading model (Meta's AV-HuBERT, adapted to Hindi and to each patient) turns the lip movements into features. Then there are two ways to produce speech:
+  - **Path A, "Stenographer + Newsreader" (reliable, built first):**
+    1. lips → **Hindi text**;
+    2. an **LLM corrects** look-alike mistakes using the person's context (where they are, who they talk to, their usual phrases);
+    3. **IndicF5**, an Indian-language text-to-speech model, speaks the text in the patient's **cloned voice**.
+
+    Accurate, but slightly flat and with a 1–2 second delay.
+  - **Path B, "Ventriloquist" (natural, our research contribution):**
+    1. lips → **speech tokens** (small sound units, one every 20 ms);
+    2. a **vocoder** turns the tokens straight into audio in the patient's voice.
+
+    It **never goes through text**, so it keeps the person's rhythm, pauses, intonation and emotion. It is harder to make accurate.
+  - **Hybrid (stretch goal):** Path B produces the sound, and Path A's corrected text keeps the words right.
 - **Phrase mode** as a safety net: the patient's 200–500 everyday phrases ("मुझे पानी चाहिए", "दर्द हो रहा है") are recognised with high reliability. If unsure, it stays silent rather than saying the wrong thing.
 - **Already done** (this is the strongest point; say it confidently):
   - the complete pipeline is coded and tested (82 automated tests);
@@ -138,10 +148,11 @@ Then thank him and confirm who sends what, and by when.
 
 ### Slide 4 · How it works (architecture)
 - Camera → stabilised lip crop → visual speech model (AV-HuBERT, adapted to Hindi)
-- **Path A:** lips → text → AI correction → cloned voice (reliable)
-- **Path B:** lips → speech sounds → voice (natural)
+- **Path A, "Stenographer + Newsreader" (reliable):** lips → Hindi text → LLM correction using the person's context → IndicF5 speaks it in their cloned voice
+- **Path B, "Ventriloquist" (natural, research contribution):** lips → speech tokens every 20 ms → vocoder in their voice; no text in between, so rhythm, intonation and emotion are kept
+- **Hybrid (stretch):** Path B makes the sound, Path A's text keeps the words correct
 - **Phrase mode:** everyday phrases, high reliability, stays silent when unsure
-- *Notes:* use the diagram from the README; don't go deep on the technology unless asked. Section 5 has the libraries and models for a backup slide.
+- *Notes:* use the diagram from the README. Explain the difference simply: Path A writes it down then reads it out; Path B speaks directly from the lips. Don't go deep on the technology unless asked. Section 5 has the libraries and models for a backup slide.
 
 ### Slide 5 · Why it's first in the world
 - Indian-language lip-to-speech: no large dataset or system exists
