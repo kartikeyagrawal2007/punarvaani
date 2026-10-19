@@ -410,7 +410,8 @@ For a tiny generator, validation mel L1 falls from 0.98 (step 100) to 0.68 (step
 ### E5. Phrase mode with rejection (`punarvaani demo`)
 6 in-set utterances → all accepted at posterior 1.00 (~15 ms each). 6 out-of-set → all rejected by the likelihood-ratio test, then decoded correctly by open-vocabulary beam search.
 
-### E6. Hybrid guidance (`tests/test_hybrid.py`)
+### E6. Hybrid guidance (`tests/test_hybrid.py`, `configs/synthetic_unit_asr.yaml`)
+The unit ASR itself reaches 0% CER on the toy world in 100 steps (`punarvaani.training.train_unit_asr`).
 Path B's guess spells a wrong middle "word"; after 50 guidance steps the CTC loss of Path A's text falls from 7.0 to 0.1 nats, only 10% of frames change, and the leading silence (timing) is untouched.
 
 ### Bug stories (great interview material: what broke, how it was found, the fix)
@@ -596,7 +597,7 @@ Real runs (GPU) are in the README's "Real pipeline" section and `configs/README.
 | 8 | **Checkpoint:** Path A demo with phrase mode + LLM | ✅ | — |
 | 9–10 | `configs/personalize.yaml` per volunteer; silent vs spoken gap study | ✅ | recordings |
 | 11–12 | Extract mHuBERT units (+ fit k-means), `path_b_units.yaml`, vocoder pretrain + fine-tune | ✅ | GPU (vocoder pretraining is the longest job) |
-| 13 | Train the unit ASR; evaluate the hybrid | ✅ model + guidance | training script for unit ASR (small) |
+| 13 | Train the unit ASR (`train_unit_asr.py`); evaluate the hybrid | ✅ | units + transcripts (audio only) |
 | 14 | Phone → laptop streaming (WebSocket) | ⚠️ laptop side done | phone client |
 | 15–16 | Evaluation, user study, paper | ✅ metrics | listeners, families |
 
@@ -605,7 +606,6 @@ Real runs (GPU) are in the README's "Real pipeline" section and `configs/README.
 - The G2P rules are approximate for loanwords and compounds (fine for visemes, not perfect phonetics).
 - The SyncNet/ECAPA classes are architectures; production needs pretrained weights.
 - The IndicF5 wrapper follows the model card's interface and must be verified once installed.
-- The unit-ASR used by the hybrid has a training loss but no dedicated training script yet.
 - Joint CTC/attention beam search is not implemented (we rescore an n-best instead).
 
 ---

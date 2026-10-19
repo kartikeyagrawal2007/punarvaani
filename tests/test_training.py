@@ -77,3 +77,13 @@ def test_unit_and_vocoder_training_smoke(tmp_path):
         "data.train_samples=8", f"train.out_dir={tmp_path / 'v'}",
     ])  # fmt: skip
     assert (tmp_path / "v" / "vocoder.pt").exists() and len(res["history"]) == 2
+
+
+def test_unit_asr_training_smoke(tmp_path):
+    from punarvaani.training import train_unit_asr
+
+    res = train_unit_asr.main([
+        "--config", "configs/synthetic_unit_asr.yaml", "train.max_steps=2", "train.eval_every=2",
+        "data.train_samples=8", "data.val_samples=4", f"train.out_dir={tmp_path}",
+    ])  # fmt: skip
+    assert 0 <= res["final"]["cer"]
