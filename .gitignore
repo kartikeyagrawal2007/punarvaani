@@ -18,17 +18,19 @@ env/
 *.key
 
 # --- Data (lives on shared Drive, never in git) ---
-data/
-datasets/
-raw/
-recordings/
+# Anchored with a leading '/' so they only match top-level folders and never
+# code packages such as punarvaani/datasets/.
+/data/
+/datasets/
+/raw/
+/recordings/
 
 # --- Model weights & training outputs (private HF Hub) ---
-checkpoints/
-outputs/
-runs/
-wandb/
-lightning_logs/
+/checkpoints/
+/outputs/
+/runs/
+/wandb/
+/lightning_logs/
 *.pt
 *.pth
 *.ckpt
