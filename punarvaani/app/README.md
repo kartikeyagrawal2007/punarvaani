@@ -6,5 +6,6 @@ Real time: phone or webcam → laptop/edge GPU → audio back. Target under 1 se
 |---|---|
 | `streaming.py` | causal online lip cropper, hysteresis lip-activity end-pointer, utterance streamer (Path A), chunked unit streamer (Path B) |
 | `realtime.py` | webcam live session: MediaPipe → crop → end-pointing → Path A → speaker |
+| `lab/` | **Lip Lab** (`punarvaani lab`): live dashboard to record, train and test phrase reading on your own face. See [`lab/README.md`](lab/README.md) |
 
 **Owner:** System lead

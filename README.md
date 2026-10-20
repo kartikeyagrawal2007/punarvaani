@@ -133,6 +133,7 @@ The full code base for every stage is implemented and tested on CPU (80+ tests).
 | Path B: lips → units/mel/pitch, unit HiFi-GAN | ✅ `models/path_b/` | 100% unit accuracy; vocoder val mel L1 0.98 → 0.68 |
 | Hybrid A+B (CTC-guided units) | ✅ `models/hybrid/` | CTC 7.0 → 0.1 nats, 10% of frames edited |
 | Real-time streaming | ✅ `app/` | end-pointing + chunked streaming tests |
+| Lip Lab: live dashboard on your own face | ✅ `app/lab/` | record → train → live test score, on webcam or a synthetic face |
 | Evaluation (WER/CER/VER, bootstrap, MOS, EER, latency) | ✅ `eval/` | checked against jiwer |
 | **Next:** mine Hindi data, record volunteers, GPU training | ⏳ | — |
 
@@ -157,7 +158,7 @@ punarvaani/
 │   ├── voice_rebuild/       # voice notes → denoise → ECAPA → speaker clustering → profile
 │   ├── training/            # trainer + train_vsr / train_units / train_vocoder
 │   ├── eval/                # metrics + evaluation runner
-│   ├── app/                 # real-time streaming + webcam demo
+│   ├── app/                 # real-time streaming, webcam demo, Lip Lab dashboard
 │   ├── recording/           # volunteer prompts, recorder, consent template
 │   └── cli.py               # `punarvaani ...` entry point
 ├── configs/                 # synthetic (CPU) and real (GPU) training recipes, phrase bank
@@ -184,9 +185,19 @@ pip install -e ".[vision,audio,llm]"    # MediaPipe/OpenCV, audio I/O, Claude AP
 pytest -q -m "not slow"                       # ~10 s
 punarvaani demo                               # trains a tiny lip reader on synthetic lips, runs Path A
 python scripts/ablation_personalization.py    # the per-user LoRA experiment
+punarvaani lab --synthetic                    # the Lip Lab dashboard with a cartoon face (no camera)
 punarvaani train-units --config configs/synthetic_units.yaml
 punarvaani train-vocoder --config configs/synthetic_vocoder.yaml
 ```
+
+## Try it on your own lips
+
+```bash
+pip install -e ".[vision]"
+punarvaani lab --user yourname                # opens a dashboard at http://127.0.0.1:8765
+```
+
+Record a few takes of each phrase, train (about a minute on a laptop), then switch to Test and watch the live score. Details: [`punarvaani/app/lab/README.md`](punarvaani/app/lab/README.md).
 
 ## Real pipeline (GPU)
 

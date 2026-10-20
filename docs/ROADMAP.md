@@ -12,7 +12,7 @@ Tick boxes as you go (`- [x]`) and keep this file up to date in each pull reques
 
 | Phase | Weeks | Status |
 |---|---|---|
-| 0. Code base (all stages, tests, CI, docs) | — | ✅ done |
+| 0. Code base (all stages, tests, CI, docs) + Lip Lab dashboard | — | ✅ done |
 | 1. Setup and weights | 1–2 | ⏳ **next** |
 | 2. Hindi data + volunteer recordings | 3–5 | ⬜ |
 | 3. Path A on Hindi | 6–7 | ⬜ |
@@ -31,6 +31,7 @@ Goal: everything needed for training is downloaded and verified, so later phases
 
 - [ ] **Sys** Get GPU access: Colab Pro, Kaggle (2×T4, 30 h/week) or a college GPU. Note memory and weekly quota.
 - [ ] **All** Clone, `pip install -e ".[dev,vision,audio,llm]"`, run `pytest -q` and `punarvaani demo` on your own machine.
+- [ ] **All** Run `punarvaani lab --user <you>`: record 5 takes of the 8 default phrases, train, and note your live test score silent vs spoken. This is the first real-lips number, and the takes are reusable personalisation data.
 - [ ] **All** Read `docs/LEARNING_GUIDE.md` §1–§5 and the AV-HuBERT, CTC and LoRA papers (guide §12).
 - [ ] **V** Download AV-HuBERT Large (`large_vox_iter5.pt`) from github.com/facebookresearch/av_hubert. Load it with `load_fairseq_checkpoint` and check that the missing/unexpected key report is empty (or only `mask_emb`).
 - [ ] **V** Sanity check: run the English checkpoint on a few LRS3-style clips and confirm the outputs are not garbage (validates our re-implementation).
