@@ -76,26 +76,35 @@ class LipActivityDetector:
     """Hysteresis end-pointer on mouth-motion energy (mean absolute frame difference of crops)."""
 
     def __init__(self, on_ratio: float = 3.0, off_ratio: float = 1.8, min_on_frames: int = 3, hang_frames: int = 12,
-                 floor_window: int = 75):  # fmt: skip
-        self.on_ratio, self.off_ratio = on_ratio, off_ratio
+                 floor_window: int = 75, min_floor: float = 0.5, warmup: int = 0):  # fmt: skip
+        self.on_ratio, self.off_ratio, self.min_floor = on_ratio, off_ratio, min_floor
+        self.warmup = warmup  # frames spent only measuring the noise floor before anything can trigger
         self.min_on, self.hang = min_on_frames, hang_frames
         self.history: deque[float] = deque(maxlen=floor_window)
         self.prev: np.ndarray | None = None
         self.active, self.on_count, self.off_count, self.t = False, 0, 0, -1
+        self.last_motion = 0.0
 
     def floor(self) -> float:
         # Noise floor = a low percentile of recent motion: camera noise, breathing, small head motion.
-        return max(float(np.percentile(self.history, 20)) if self.history else 0.0, 0.5)
+        return max(float(np.percentile(self.history, 20)) if self.history else 0.0, self.min_floor)
 
     def __call__(self, crop: np.ndarray) -> ActivityEvent | None:
-        self.t += 1
         motion = 0.0 if self.prev is None else float(np.abs(crop.astype(np.float32) - self.prev).mean())
         self.prev = crop.astype(np.float32)
+        return self.update(motion)
+
+    def update(self, motion: float) -> ActivityEvent | None:
+        """Feed any per-frame motion signal directly (e.g. lip-landmark speed instead of pixel change)."""
+        self.t += 1
+        self.last_motion = motion
         floor = self.floor()
         if not self.active:
             self.history.append(motion)
         self.on_count = self.on_count + 1 if motion > self.on_ratio * floor else 0
         self.off_count = self.off_count + 1 if motion < self.off_ratio * floor else 0
+        if self.t < self.warmup:
+            self.on_count = 0
         if not self.active and self.on_count >= self.min_on:
             self.active, self.off_count = True, 0
             return ActivityEvent("start", self.t - self.min_on + 1)
