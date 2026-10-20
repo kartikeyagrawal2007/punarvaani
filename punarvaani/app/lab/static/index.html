@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Punarvaani Lip Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect x=%222%22 y=%225%22 width=%222%22 height=%226%22 rx=%221%22 fill=%22%231F7A73%22/%3E%3Crect x=%227%22 y=%222%22 width=%222%22 height=%2212%22 rx=%221%22 fill=%22%23FF6B4A%22/%3E%3Crect x=%2212%22 y=%225%22 width=%222%22 height=%226%22 rx=%221%22 fill=%22%231F7A73%22/%3E%3C/svg%3E">
+<style>
+:root{
+  --deep:#0E3B3F; --teal:#1F7A73; --soft:#9FC9C4; --tint:#EAF3F2; --coral:#FF6B4A; --ctint:#FFE3DB;
+  --ink:#10282B; --muted:#5C6B70; --line:#D7E2E0; --bg:#F4F7F6; --card:#FFFFFF; --good:#1F7A73; --bad:#E0492A;
+  --serif: Cambria, Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Calibri, "Noto Sans Devanagari", "Kohinoor Devanagari", sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px}
+header{background:var(--deep);color:#fff;display:flex;align-items:center;gap:20px;padding:12px 24px;position:sticky;top:0;z-index:5}
+.brand{display:flex;align-items:center;gap:12px;min-width:260px}
+.brand h1{font-family:var(--serif);font-size:22px;margin:0;font-weight:700;letter-spacing:.2px}
+.brand small{color:var(--soft);display:block;font-size:12px;margin-top:2px}
+.logo{display:flex;align-items:center;gap:3px;height:28px}
+.logo i{display:block;width:4px;border-radius:2px;background:var(--soft)}
+.logo i:nth-child(3n){background:var(--coral)}
+.seg{display:inline-flex;background:rgba(255,255,255,.08);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:inherit;font:inherit;padding:7px 14px;border-radius:8px;cursor:pointer;opacity:.8}
+.seg button.on{background:#fff;color:var(--deep);opacity:1;font-weight:600}
+.light .seg{background:var(--tint)}
+.light .seg button{color:var(--ink)}
+.light .seg button.on{background:var(--teal);color:#fff}
+.chips{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:5px 11px;font-size:12px;color:#DCEBE9;white-space:nowrap}
+.chip b{color:#fff}
+.chip.ok{border-color:var(--soft)} .chip.warn{border-color:var(--coral);color:#FFD5CB}
+main{display:grid;grid-template-columns:minmax(380px,560px) 1fr;gap:20px;padding:20px 24px;max-width:1500px;margin:0 auto}
+@media (max-width:1000px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:20px}
+.card h2{font-family:var(--serif);font-size:18px;margin:0 0 12px}
+.kicker{font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--teal);margin-bottom:6px}
+.kicker.coral{color:var(--coral)}
+.muted{color:var(--muted)}
+.videowrap{position:relative;border-radius:12px;overflow:hidden;background:#0b2a2d;aspect-ratio:4/3}
+.videowrap img{width:100%;height:100%;object-fit:cover;display:block}
+.badge{position:absolute;top:12px;left:12px;padding:6px 12px;border-radius:999px;font-weight:700;font-size:12px;letter-spacing:1px;background:rgba(14,59,63,.85);color:#fff;display:flex;align-items:center;gap:8px}
+.badge .dot{width:9px;height:9px;border-radius:50%;background:var(--soft)}
+.badge.speaking{background:var(--coral)} .badge.speaking .dot{background:#fff;animation:pulse 0.8s infinite}
+.badge.noface{background:#555}
+@keyframes pulse{50%{opacity:.3}}
+.hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;color:#fff;font-size:13px;text-shadow:0 1px 3px #000}
+.row{display:flex;gap:14px;align-items:stretch;margin-top:14px}
+.crop{width:132px;flex:none;text-align:center}
+.crop img{width:132px;height:132px;border-radius:10px;background:#ddd;display:block;image-rendering:pixelated}
+.crop span{font-size:11px;color:var(--muted)}
+.chart{flex:1;min-width:0}
+.chart canvas{width:100%;height:132px;display:block;background:var(--tint);border-radius:10px}
+.legend{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:12px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:4px}
+.controls{display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;margin-top:16px}
+.controls label{font-weight:600;font-size:13px}
+input[type=range]{width:100%;accent-color:var(--teal)}
+.btn{border:1px solid var(--line);background:#fff;color:var(--ink);font:inherit;padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:600}
+.btn:hover{border-color:var(--teal)}
+.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}
+.btn.coral{background:var(--coral);border-color:var(--coral);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.prompt{background:var(--deep);color:#fff;border:0;position:relative;overflow:hidden}
+.prompt .kicker{color:var(--coral)}
+.prompt .phrase{font-size:44px;font-weight:700;line-height:1.25;margin:4px 0 10px;min-height:56px}
+.prompt .sub{color:var(--soft)}
+.prompt .actions{display:flex;gap:10px;margin-top:14px}
+.prompt .btn{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.25);color:#fff}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:1250px){.grid2{grid-template-columns:1fr}}
+.result .heard{font-size:34px;font-weight:700;margin:2px 0 8px;min-height:44px}
+.pill{display:inline-block;padding:4px 11px;border-radius:999px;font-weight:700;font-size:12px}
+.pill.good{background:var(--tint);color:var(--good)} .pill.bad{background:var(--ctint);color:var(--bad)} .pill.neutral{background:#EEF1F1;color:var(--muted)}
+.models{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+.model{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.model.primary{border-color:var(--teal);box-shadow:0 0 0 1px var(--teal) inset}
+.model h3{margin:0 0 8px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between}
+.bar{display:grid;grid-template-columns:1fr 46px;gap:8px;align-items:center;margin:5px 0;font-size:13px}
+.bar .track{grid-column:1/3;height:6px;background:var(--tint);border-radius:3px;overflow:hidden;margin-top:-2px}
+.bar .fill{height:100%;background:var(--soft)}
+.bar.top .fill{background:var(--teal)}
+.bar.wrong .fill{background:var(--coral)}
+.bar .lab{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar .val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse}
+td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}
+th{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);font-weight:700}
+td.num,th.num{text-align:center;font-variant-numeric:tabular-nums}
+tr.current td{background:var(--ctint)}
+.prog{height:6px;background:var(--tint);border-radius:3px;overflow:hidden;min-width:60px}
+.prog i{display:block;height:100%;background:var(--teal)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:6px 0 16px}
+.stat{background:var(--tint);border-radius:10px;padding:12px}
+.stat b{font-family:var(--serif);font-size:30px;display:block;line-height:1.1}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.hero{background:var(--deep);color:#fff} .stat.hero span{color:var(--soft)} .stat.hero b{color:var(--coral)}
+.cvbox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.cvbox .stat{position:relative}
+.star{position:absolute;top:10px;right:10px;font-size:11px;font-weight:700;color:var(--coral)}
+.progress{height:8px;background:var(--tint);border-radius:4px;overflow:hidden;margin:10px 0 6px}
+.progress i{display:block;height:100%;background:var(--coral);transition:width .2s}
+textarea{width:100%;min-height:180px;font:inherit;font-size:15px;border:1px solid var(--line);border-radius:10px;padding:10px}
+.events{list-style:none;margin:0;padding:0;max-height:260px;overflow:auto}
+.events li{padding:6px 0;border-bottom:1px dashed var(--line);font-size:13px;display:flex;gap:10px}
+.events li time{color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+.events li.good span{color:var(--good)} .events li.bad span{color:var(--bad)} .events li.muted span{color:var(--muted)}
+.conf td{text-align:center;font-variant-numeric:tabular-nums}
+.conf td:first-child{text-align:left;white-space:nowrap}
+.hide{display:none!important}
+.note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+canvas.loss{width:100%;height:60px;display:block;margin-top:8px}
+kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:12px;color:var(--ink)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo" id="logo"></div>
+    <div><h1>Lip Lab</h1><small>Punarvaani · <span id="user">me</span></small></div>
+  </div>
+  <div class="seg" id="modeSeg">
+    <button data-v="record">1 · Record</button>
+    <button data-v="test">2 · Test</button>
+    <button data-v="free">Free</button>
+  </div>
+  <div class="chips">
+    <span class="chip" id="chipFps">camera <b>–</b></span>
+    <span class="chip" id="chipFace">face <b>–</b></span>
+    <span class="chip" id="chipModel">model <b>–</b></span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <div class="videowrap">
+        <img src="/video.mjpg" alt="camera">
+        <div class="badge" id="badge"><span class="dot"></span><span id="badgeText">LISTENING</span></div>
+        <div class="hint" id="hint"></div>
+      </div>
+      <div class="row">
+        <div class="crop"><img src="/crop.mjpg" alt="lip crop"><span>what the model sees</span></div>
+        <div class="chart">
+          <canvas id="motion" width="600" height="132"></canvas>
+          <div class="legend"><span><i style="background:var(--teal)"></i>lip movement</span><span><i style="background:var(--coral)"></i>start line</span><span><i style="background:var(--soft)"></i>stop line</span><span><i style="background:var(--ctint);height:8px"></i>recorded</span></div>
+        </div>
+      </div>
+      <div class="controls light">
+        <label>Start</label>
+        <div class="seg" id="triggerSeg"><button data-v="auto">Automatic</button><button data-v="hold">Hold <kbd>Space</kbd></button></div>
+        <label>Speech</label>
+        <div class="seg" id="speechSeg"><button data-v="silent">Silent mouthing</button><button data-v="spoken">Spoken aloud</button></div>
+        <label>Sensitivity</label>
+        <div><input type="range" id="sens" min="1.5" max="6" step="0.25"><div class="muted" style="font-size:11px">left = starts on smaller movements · right = needs bigger movements</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Activity</h2>
+      <ul class="events" id="events"></ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="card prompt" id="promptCard">
+      <div class="kicker" id="promptKicker">Mouth this</div>
+      <div class="phrase" id="promptPhrase">–</div>
+      <div class="sub" id="promptSub"></div>
+      <div class="actions">
+        <button class="btn" id="skipBtn">Skip <kbd style="background:transparent;color:#fff">S</kbd></button>
+        <button class="btn" id="delBtn">Delete last take</button>
+      </div>
+    </div>
+
+    <div class="card result" id="resultCard">
+      <div class="kicker">Last result</div>
+      <div class="heard" id="heard">–</div>
+      <div><span class="pill neutral" id="verdict">waiting</span> <span class="muted" id="resultMeta"></span></div>
+      <div class="models" id="modelBoxes">
+        <div class="model" id="m_dtw"><h3><span>Template match (DTW)</span><span id="m_dtw_tag"></span></h3><div class="bars"></div></div>
+        <div class="model" id="m_neural"><h3><span>Neural (temporal CNN)</span><span id="m_neural_tag"></span></h3><div class="bars"></div></div>
+      </div>
+      <div class="note" id="openVocab"></div>
+    </div>
+
+    <div class="grid2" id="recordPanel">
+      <div class="card">
+        <h2>Your phrases</h2>
+        <div id="phraseTableWrap">
+          <table><thead><tr><th>Phrase</th><th class="num">Silent</th><th class="num">Spoken</th><th>Goal 5</th></tr></thead><tbody id="phraseRows"></tbody></table>
+          <div style="margin-top:12px"><button class="btn" id="editBtn">Edit phrases</button></div>
+        </div>
+        <div id="phraseEdit" class="hide">
+          <textarea id="phraseText"></textarea>
+          <div style="margin-top:10px;display:flex;gap:10px"><button class="btn primary" id="saveBtn">Save</button><button class="btn" id="cancelBtn">Cancel</button></div>
+          <div class="note">One phrase per line. Short, visually different phrases are easiest to tell apart.</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Train</h2>
+        <button class="btn coral" id="trainBtn">Train both readers</button>
+        <div class="progress"><i id="trainBar" style="width:0"></i></div>
+        <div class="muted" id="trainMsg">Record at least 2 takes of 2 phrases, then train.</div>
+        <div class="cvbox">
+          <div class="stat"><span class="star hide" id="star_dtw">USED LIVE</span><b id="cv_dtw">–</b><span>Template match · held-out accuracy</span></div>
+          <div class="stat"><span class="star hide" id="star_neural">USED LIVE</span><b id="cv_neural">–</b><span>Neural · held-out accuracy</span></div>
+        </div>
+        <canvas class="loss" id="loss" width="500" height="60"></canvas>
+        <div class="note">Held-out accuracy: each take is predicted by a model that never saw it. It is your best guess for live accuracy. The template match needs no training and updates after every take.</div>
+      </div>
+    </div>
+
+    <div id="testPanel" class="hide">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">Live test score</h2><button class="btn" id="resetBtn">New test run</button></div>
+        <div class="stats" style="margin-top:14px">
+          <div class="stat hero"><b id="accAll">–</b><span>correct out of all attempts</span></div>
+          <div class="stat"><b id="accAns">–</b><span>correct when it answered</span></div>
+          <div class="stat"><b id="coverage">–</b><span>answered (rest: stayed silent)</span></div>
+        </div>
+        <div class="muted" id="modeSplit"></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h2>Per phrase</h2><div id="perPhrase"></div></div>
+        <div class="card"><h2>Recent attempts</h2><table><tbody id="recent"></tbody></table></div>
+      </div>
+      <div class="card"><h2>Confusion: said vs heard</h2><div style="overflow:auto"><table class="conf" id="confusion"></table></div>
+        <div class="note">Rows: what you mouthed. Columns: what the model heard. Mistakes off the diagonal show which phrases look alike on the lips.</div></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let S = null, editing = false;
+const post = (path, body = {}) => fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json());
+const pct = (x) => x == null ? "–" : Math.round(x * 100) + "%";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+[6, 12, 20, 28, 18, 10, 22, 14, 6].forEach(h => { const i = document.createElement("i"); i.style.height = h + "px"; $("logo").appendChild(i); });
+
+function seg(id, key) {
+  $(id).querySelectorAll("button").forEach(b => b.onclick = () => { post("/api/config", {[key]: b.dataset.v}).then(poll); });
+}
+seg("modeSeg", "mode"); seg("triggerSeg", "trigger"); seg("speechSeg", "speech_mode");
+function setSeg(id, v) { $(id).querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === v)); }
+$("sens").onchange = (e) => post("/api/config", {sensitivity: parseFloat(e.target.value)});
+$("skipBtn").onclick = () => post("/api/skip").then(poll);
+$("delBtn").onclick = () => post("/api/delete_last").then(poll);
+$("trainBtn").onclick = () => post("/api/train").then(r => { if (!r.ok) $("trainMsg").textContent = r.message; poll(); });
+$("resetBtn").onclick = () => { if (confirm("Start a new test run? Old results are kept in an archive file.")) post("/api/reset_results").then(poll); };
+$("editBtn").onclick = () => { editing = true; $("phraseText").value = S.phrases.map(p => p.text).join("\n"); $("phraseEdit").classList.remove("hide"); $("phraseTableWrap").classList.add("hide"); };
+$("cancelBtn").onclick = () => { editing = false; $("phraseEdit").classList.add("hide"); $("phraseTableWrap").classList.remove("hide"); };
+$("saveBtn").onclick = () => post("/api/phrases", {phrases: $("phraseText").value.split("\n")}).then(() => { $("cancelBtn").onclick(); poll(); });
+
+let spaceDown = false;
+const typing = () => ["TEXTAREA", "INPUT"].includes(document.activeElement.tagName);
+document.addEventListener("keydown", (e) => {
+  if (typing()) return;
+  if (e.code === "Space") { e.preventDefault(); if (!spaceDown && S && S.trigger === "hold") { spaceDown = true; post("/api/hold", {down: true}); } }
+  if (e.key === "s" || e.key === "S") post("/api/skip").then(poll);
+});
+document.addEventListener("keyup", (e) => { if (e.code === "Space" && spaceDown) { spaceDown = false; post("/api/hold", {down: false}); } });
+window.addEventListener("blur", () => { if (spaceDown) { spaceDown = false; post("/api/hold", {down: false}); } });
+
+function drawMotion(a) {
+  const c = $("motion"), ctx = c.getContext("2d"), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  const m = a.motion, n = 150, top = Math.max(a.on * 1.6, ...m, 0.5);
+  const y = (v) => H - 6 - (v / top) * (H - 12), x = (i) => (i + n - m.length) * W / (n - 1);
+  a.speaking.forEach((s, i) => { if (s) { ctx.fillStyle = "#FFE3DB"; ctx.fillRect(x(i) - W / n / 2, 0, W / n + 1, H); } });
+  [[a.on, "#FF6B4A"], [a.off, "#9FC9C4"]].forEach(([v, col]) => { ctx.strokeStyle = col; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(W, y(v)); ctx.stroke(); });
+  ctx.setLineDash([]); ctx.strokeStyle = "#1F7A73"; ctx.lineWidth = 2; ctx.beginPath();
+  m.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))); ctx.stroke();
+}
+
+function drawLoss(losses) {
+  const c = $("loss"), ctx = c.getContext("2d"), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!losses || losses.length < 2) return;
+  const mx = Math.max(...losses), mn = Math.min(...losses);
+  ctx.strokeStyle = "#FF6B4A"; ctx.lineWidth = 2; ctx.beginPath();
+  losses.forEach((v, i) => { const X = i * W / (losses.length - 1), Y = H - 4 - (v - mn) / (mx - mn + 1e-9) * (H - 8); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.stroke(); ctx.fillStyle = "#5C6B70"; ctx.font = "11px sans-serif"; ctx.fillText("training loss " + losses[losses.length - 1].toFixed(2), 4, 12);
+}
+
+function bars(el, pred, target, isPrimary) {
+  if (!pred) { el.innerHTML = '<div class="muted">not trained yet</div>'; return; }
+  el.innerHTML = pred.top.map(([lab, p], i) => {
+    const cls = i === 0 ? (target && lab !== target ? "top wrong" : "top") : "";
+    return `<div class="bar ${cls}"><span class="lab">${esc(lab)}</span><span class="val">${Math.round(p * 100)}%</span><div class="track"><div class="fill" style="width:${p * 100}%"></div></div></div>`;
+  }).join("") + (pred.rejected ? '<div class="muted" style="margin-top:6px">below the confidence line: stays silent</div>' : "");
+}
+
+function render() {
+  const s = S;
+  $("user").textContent = s.user;
+  setSeg("modeSeg", s.mode); setSeg("triggerSeg", s.trigger); setSeg("speechSeg", s.speech_mode);
+  if (document.activeElement !== $("sens")) $("sens").value = s.sensitivity;
+  $("chipFps").innerHTML = `camera <b>${s.camera.fps} fps</b>`;
+  $("chipFace").className = "chip " + (s.camera.face ? "ok" : "warn");
+  $("chipFace").innerHTML = `face <b>${s.camera.face ? "found" : "not found"}</b>`;
+  const prim = s.training.primary;
+  $("chipModel").innerHTML = `model <b>${s.models.length ? (prim === "neural" ? "neural" : "template match") : "none yet"}</b>`;
+
+  const speaking = s.activity.active;
+  $("badge").className = "badge " + (!s.camera.face ? "noface" : speaking ? "speaking" : "");
+  $("badgeText").textContent = !s.camera.face ? "NO FACE: LOOK AT THE CAMERA" : s.camera.calibrating ? "CALIBRATING: KEEP LIPS STILL" : speaking ? (s.mode === "record" ? "RECORDING" : "READING YOUR LIPS") : (s.trigger === "hold" ? "READY" : "LISTENING");
+  $("hint").textContent = s.trigger === "hold" ? "Hold Space while you mouth the phrase" : "Keep your lips still, then mouth the phrase. It stops by itself when you pause.";
+  drawMotion(s.activity);
+
+  const counts = Object.fromEntries(s.phrases.map(p => [p.text, p.silent + p.spoken]));
+  $("promptCard").classList.toggle("hide", s.mode === "free" && false);
+  $("delBtn").classList.toggle("hide", s.mode !== "record");
+  if (s.mode === "free") {
+    $("promptKicker").textContent = "Free mode"; $("promptPhrase").textContent = "Mouth any of your phrases";
+    $("promptSub").textContent = "No scoring: just see what it reads."; $("skipBtn").classList.add("hide");
+  } else {
+    $("skipBtn").classList.remove("hide");
+    $("promptKicker").textContent = s.mode === "record" ? `Record · ${s.speech_mode === "silent" ? "mouth silently" : "say it aloud"}` : `Test · ${s.speech_mode === "silent" ? "mouth silently" : "say it aloud"}`;
+    $("promptPhrase").textContent = s.target || "Add some phrases";
+    $("promptSub").textContent = s.mode === "record"
+      ? `${counts[s.target] || 0} take(s) so far · aim for 5 per phrase, ideally on different days`
+      : `Attempt ${s.stats.overall.n + 1} · the model doesn't know which phrase you were asked`;
+  }
+
+  const L = s.last;
+  $("modelBoxes").classList.toggle("hide", !(L && L.kind === "prediction"));
+  if (L && L.kind === "prediction") {
+    $("heard").textContent = L.predicted || "(not sure, stays silent)";
+    const v = $("verdict");
+    if (L.task === "test" && L.correct !== undefined) {
+      v.className = "pill " + (L.correct ? "good" : L.rejected ? "neutral" : "bad");
+      v.textContent = L.correct ? "✓ correct" : L.rejected ? "stayed silent" : "✗ wrong, it was “" + L.target + "”";
+    } else { v.className = "pill neutral"; v.textContent = "free mode"; }
+    $("resultMeta").textContent = `${L.frames} frames · ${L.latency_ms} ms · ${L.speech_mode}`;
+    ["dtw", "neural"].forEach(k => {
+      bars(document.querySelector(`#m_${k} .bars`), L.predictions[k], L.target, k === L.primary);
+      $("m_" + k).classList.toggle("primary", k === L.primary);
+      $(`m_${k}_tag`).textContent = k === L.primary ? "used" : "";
+    });
+    $("openVocab").textContent = L.open_vocab ? "Open-vocabulary lip reader: " + L.open_vocab : (s.open_vocab ? "" : "Open-vocabulary reader: not loaded (start with --run once the Hindi model is trained).");
+  } else if (L && L.kind === "take") {
+    $("heard").textContent = "Saved: " + L.target; $("verdict").className = "pill good"; $("verdict").textContent = "take recorded";
+    $("resultMeta").textContent = `${L.frames} frames`;
+  }
+
+  $("recordPanel").classList.toggle("hide", s.mode !== "record");
+  $("testPanel").classList.toggle("hide", s.mode === "record");
+  if (!editing) {
+    $("phraseRows").innerHTML = s.phrases.map(p => {
+      const n = p.silent + p.spoken;
+      return `<tr class="${p.text === s.target && s.mode === "record" ? "current" : ""}"><td>${esc(p.text)}</td><td class="num">${p.silent}</td><td class="num">${p.spoken}</td><td><div class="prog"><i style="width:${Math.min(100, n * 20)}%"></i></div></td></tr>`;
+    }).join("");
+  }
+  const t = s.training;
+  $("trainBtn").disabled = t.status === "training";
+  $("trainBtn").textContent = t.status === "training" ? "Training…" : (t.status === "ready" ? "Retrain with new takes" : "Train both readers");
+  $("trainBar").style.width = t.total ? (100 * t.step / t.total) + "%" : (t.status === "ready" ? "100%" : "0");
+  if (t.message) $("trainMsg").textContent = t.message;
+  ["dtw", "neural"].forEach(k => {
+    const cv = t.cv && t.cv[k];
+    $("cv_" + k).textContent = cv ? pct(cv.accuracy) : "–";
+    $("star_" + k).classList.toggle("hide", t.primary !== k || !cv);
+  });
+  drawLoss(t.losses);
+
+  const st = s.stats, o = st.overall;
+  $("accAll").textContent = o.n ? pct(o.accuracy) : "–";
+  $("accAns").textContent = pct(o.answered_accuracy);
+  $("coverage").textContent = pct(o.coverage);
+  $("modeSplit").textContent = o.n ? `${o.n} attempts · ` + Object.entries(st.by_mode).map(([k, b]) => `${k}: ${pct(b.accuracy)} of ${b.n}`).join(" · ") + (st.latency_p50 != null ? ` · typical time to read ${Math.round(st.latency_p50)} ms` : "") : "Switch to Test, mouth the prompted phrase, and watch the score build up.";
+  $("perPhrase").innerHTML = Object.entries(st.per_phrase).sort((a, b) => (a[1].accuracy ?? 0) - (b[1].accuracy ?? 0)).map(([p, b]) =>
+    `<div class="bar ${b.accuracy < 0.5 ? "wrong" : "top"}"><span class="lab">${esc(p)}</span><span class="val">${b.correct}/${b.n}</span><div class="track"><div class="fill" style="width:${(b.accuracy ?? 0) * 100}%"></div></div></div>`).join("") || '<div class="muted">No attempts yet.</div>';
+  $("recent").innerHTML = st.recent.map(r => `<tr><td>${r.correct ? "✓" : r.rejected ? "–" : "✗"}</td><td>${esc(r.target)}</td><td class="muted">→ ${esc(r.predicted || "(silent)")}</td><td class="muted">${r.speech_mode}</td></tr>`).join("");
+  const rows = Object.keys(st.confusion), cols = [...new Set([...rows, ...rows.flatMap(r => Object.keys(st.confusion[r]))])];
+  $("confusion").innerHTML = rows.length ? `<tr><th>said ↓ heard →</th>${cols.map(c => `<th class="num">${esc(c)}</th>`).join("")}</tr>` + rows.map(r => {
+    const tot = Object.values(st.confusion[r]).reduce((a, b) => a + b, 0);
+    return `<tr><td>${esc(r)}</td>${cols.map(c => { const v = st.confusion[r][c] || 0, a = v / tot; const bg = !v ? "" : c === r ? `rgba(31,122,115,${0.15 + 0.6 * a})` : `rgba(255,107,74,${0.15 + 0.6 * a})`; return `<td style="background:${bg}">${v || ""}</td>`; }).join("")}</tr>`;
+  }).join("") : '<tr><td class="muted">No attempts yet.</td></tr>';
+
+  $("events").innerHTML = s.events.map(e => `<li class="${e.kind}"><time>${e.t}</time><span>${esc(e.text)}</span></li>`).join("") || '<li class="muted"><span>Waiting for your first take…</span></li>';
+}
+
+async function poll() {
+  try { S = await (await fetch("/api/state")).json(); render(); } catch (e) { $("badgeText").textContent = "LAB NOT RUNNING"; }
+}
+setInterval(poll, 200); poll();
+</script>
+</body>
+</html>

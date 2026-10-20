@@ -30,6 +30,9 @@ punarvaani = "punarvaani.cli:main"
 [tool.setuptools.packages.find]
 include = ["punarvaani*"]
 
+[tool.setuptools.package-data]
+"punarvaani.app.lab" = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: trains a tiny model for a few hundred steps (deselect with -m 'not slow')"]
