@@ -307,6 +307,17 @@ Real data is large, private and slow. **Bugs in shapes, masks, CTC lengths or Lo
 
 *A model that can learn this has working plumbing; one that can't has a bug.* The 81 tests cover maths against references (CTC beam scores vs PyTorch's exact likelihood, WER vs jiwer, Umeyama recovery of a known transform, YIN on a known tone, LoRA merge exactness, k-means cluster recovery, fairseq key round-trip), invariances (padding, timing preservation), and end-to-end smoke runs of every training script. One `slow` test trains the tiny model and asserts CER < 35%.
 
+### 4.18 Lip Lab: the live dashboard (`app/lab/`)
+
+`punarvaani lab` opens a local web page: webcam → MediaPipe → mouth crop + lip-shape features → lip-activity end-pointing → two few-shot phrase readers, with a live score. It exists because the open-vocabulary model can't be judged on real lips until GPU training is done, but phrase mode on one person's face can be judged **today**.
+
+- **Features, not pixels.** 40 lip landmarks mapped into the canonical face by the same similarity transform as the crop: 80 numbers per frame instead of 7,744 pixels, and invariant to head position, scale and tilt (tested). With 5 takes per phrase, a pixel model would overfit instantly.
+- **Two readers on purpose.** DTW template matching (no training, works from one take) is the *baseline*; a temporal CNN with augmentation is the learned model. The dashboard uses whichever has the higher held-out accuracy. Always report a learned model next to a simple baseline.
+- **Batched DTW.** The DP cell (i, j) depends on (i-1, j-1), (i-1, j) and (i, j-1), so cells on the same anti-diagonal are independent. Sweeping n + m diagonals over all templates at once gives the exact textbook result (tested) in ~50 ms for 60 takes.
+- **Honest numbers.** Training reports leave-one-out (DTW) / 4-fold (CNN) accuracy: every take is predicted by a model that never saw it. The live test separates *accuracy*, *coverage* (how often it answered) and *accuracy when it answered*, because staying silent is a feature for patients, not a bug.
+- **End-pointing without audio.** Silent speakers make no sound, so it watches lip-shape speed with hysteresis (start and stop thresholds) and a 0.4 s hang-over. A 1-second warm-up measures the noise floor first. Without it, the detector fired immediately and recorded 10-second junk takes, which dropped held-out accuracy from 100% to 44% in a test (bug B9).
+- Every take is saved in the project manifest format (96×96 crops + lip points), so the lab doubles as the volunteer recording tool for personalisation.
+
 ---
 
 ## 5. Decisions log
@@ -432,6 +443,8 @@ Path B's guess spells a wrong middle "word"; after 50 guidance steps the CTC los
 
 **B8. A failing test got committed.** A shell pipeline (`pytest | tail`) hid pytest's exit code, so the commit went through. Fix: a check script that fails on test failure; the commit was amended before pushing. (Lesson: check `PIPESTATUS`, or use `set -o pipefail`.)
 
+**B9. The lab recorded 10-second junk takes on start-up.** Lip-activity end-pointing compares motion to a noise floor learned from recent frames. At start-up there is no history, so the floor sat at its minimum, normal jitter crossed the start line, and every take ran to the 250-frame cap. Held-out accuracy on the synthetic face fell to 44%. Fix: a `warmup` period (1 s) that only measures the floor, plus a *CALIBRATING* badge so the user keeps still. Back to 100%.
+
 ---
 
 ## 7. Background knowledge you must know
@@ -547,6 +560,9 @@ Accuracy (mitigated by personalisation, LM/LLM, phrase mode), data volume/qualit
 **Q: What would you do with more time / compute?**
 Real Hindi training and the silent/spoken study; DTW-aligned cross-modal supervision for silent takes; joint CTC/attention beam search; a better LM (KenLM/Kneser-Ney, or a small neural LM); a learned unit ASR + full hybrid; on-device quantisation (int8) for the phone; a hospital validation study.
 
+**Q: How do you know how well it works on a real person today?**
+The Lip Lab (`punarvaani lab`): record ~5 takes per phrase, train a DTW baseline and a temporal CNN in about a minute on a laptop, and read held-out accuracy plus a live test score, silent vs spoken. It measures phrase mode on one face, not open-vocabulary Hindi lip reading, which needs the GPU-trained model.
+
 **Q: What was the hardest bug?**
 Pick B2 (padding leak) or B3 (LoRA eval mode) and tell it as: symptom → test that caught it → root cause → fix → what you'd do to prevent it.
 
@@ -576,6 +592,10 @@ python scripts/ablation_personalization.py             # E2
 punarvaani train-units --config configs/synthetic_units.yaml       # E3
 punarvaani train-vocoder --config configs/synthetic_vocoder.yaml   # E4
 punarvaani evaluate --run outputs/synthetic_vsr --phrases configs/phrases_hi.txt
+
+# live dashboard on your own lips (needs ".[vision]"), or a cartoon face without a camera
+punarvaani lab --user yourname
+punarvaani lab --synthetic
 
 # override any config key from the command line
 punarvaani train-vsr --config configs/synthetic_vsr.yaml train.max_steps=100 model.ctc_weight=0.3

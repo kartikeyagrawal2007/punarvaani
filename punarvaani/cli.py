@@ -7,6 +7,7 @@ punarvaani train-vocoder --config ... # Path B unit vocoder
 punarvaani evaluate --run ...         # CER/WER/VER, phrase mode, latency
 punarvaani rebuild-voice --out profile/ notes/*.wav [--enroll me.wav]
 punarvaani mine --urls urls.txt --out data/ --face-model face_landmarker.task
+punarvaani lab --user kartikey        # live dashboard: record, train and test on your own lips
 """
 
 from __future__ import annotations
@@ -115,6 +116,9 @@ def main(argv=None) -> None:
 
     for name in ("train-vsr", "train-units", "train-vocoder", "evaluate"):
         sub.add_parser(name, add_help=False)
+    sub.add_parser(
+        "lab", add_help=False, help="live dashboard: record, train and test lip reading on your own face"
+    )
 
     r = sub.add_parser("rebuild-voice", help="voice notes -> reference clip + speaker embedding")
     r.add_argument("inputs", nargs="+")
@@ -130,6 +134,11 @@ def main(argv=None) -> None:
     m.add_argument("--asr-model", default="openai/whisper-large-v3")
 
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "lab":
+        from punarvaani.app.lab.server import main as lab_main
+
+        lab_main(argv[1:])
+        return
     if argv and argv[0] in ("train-vsr", "train-units", "train-vocoder", "evaluate"):
         from punarvaani.eval import evaluate
         from punarvaani.training import train_units, train_vocoder, train_vsr
