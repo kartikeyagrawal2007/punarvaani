@@ -1,120 +1,231 @@
 import os
+import re
+import cv2
 import torch
 import numpy as np
 from torch.utils.data import Dataset
-from decord import VideoReader, cpu
-import pronouncing  # Import the pronouncing library
-import re
+try:
+    from decord import VideoReader, cpu
+    HAS_DECORD = True
+except ImportError:
+    HAS_DECORD = False
 
-class VideoDataset(Dataset):
-    def __init__(self, video_dir, phoneme_vocab, split="train", num_frames=16, frame_size=(224, 224)):
-        self.video_dir = video_dir
+
+from Data.hindi_g2p import devanagari_to_phonemes
+
+try:
+    from face_cropper import FaceCropper
+    HAS_FACE_CROPPER = True
+except ImportError:
+    HAS_FACE_CROPPER = False
+
+
+class HindiVideoDataset(Dataset):
+    """
+    Dataset for Hindi Visual Speech Recognition.
+    Loads paired video files (dataXXX.mp4) and transcripts (dataXXX.txt) from a directory.
+    """
+    def __init__(
+        self,
+        data_dir: str,
+        phoneme_vocab: dict,
+        split: str = "train",
+        val_split: float = 0.1,
+        num_frames: int = 16,
+        frame_size: tuple = (224, 224),
+        crop_face: bool = True,
+        seed: int = 42
+    ):
+        self.data_dir = data_dir
+        self.phoneme_vocab = phoneme_vocab
         self.split = split
         self.num_frames = num_frames
         self.frame_size = frame_size
-        self.phoneme_vocab = phoneme_vocab  # Phoneme to index mapping
+        self.crop_face = crop_face
 
-        self.video_paths = []
-        self.labels = []
+        self.face_cropper = None
+        if self.crop_face and HAS_FACE_CROPPER:
+            try:
+                self.face_cropper = FaceCropper(
+                    min_face_detector_confidence=0.5,
+                    face_detector_model_selection="SHORT_RANGE",
+                    landmark_detector_static_image_mode="STATIC_MODE",
+                    min_landmark_detector_confidence=0.5
+                )
+            except Exception as e:
+                print(f"[Warning] Could not initialize FaceCropper: {e}. Falling back to standard resize.")
 
-        for class_name in os.listdir(video_dir):
-            class_path = os.path.join(video_dir, class_name)
-            count = 0
-            if os.path.isdir(class_path):
-                split_path = os.path.join(class_path, split)
-                if os.path.isdir(split_path):
-                    for video_name in os.listdir(split_path):
-                        # if count == 10:
-                        #     break
-                        # count += 1
-                        video_path = os.path.join(split_path, video_name)
-                        if video_name.endswith(('.mp4', '.avi', '.mov', '.mkv')):
-                            self.video_paths.append(video_path)
-                            self.labels.append(class_name)
+        if not os.path.exists(data_dir):
+            raise FileNotFoundError(f"Data directory '{data_dir}' does not exist.")
 
-        if len(self.video_paths) == 0:
-            raise ValueError(f"No video files found in directory: {video_dir} for split: {split}")
+        # Discover all paired videos and transcripts
+        all_samples = []
+        valid_extensions = ('.mp4', '.avi', '.mov', '.mkv')
+        
+        for root, _, files in os.walk(data_dir):
+            for file in files:
+                if file.lower().endswith(valid_extensions):
+                    base_name = os.path.splitext(file)[0]
+                    txt_name = f"{base_name}.txt"
+                    txt_path = os.path.join(root, txt_name)
+                    video_path = os.path.join(root, file)
 
-        print(f"Loaded {len(self.video_paths)} videos from {split} split in {video_dir}.")
+                    if os.path.exists(txt_path):
+                        all_samples.append((video_path, txt_path))
+
+        if len(all_samples) == 0:
+            raise ValueError(f"No valid video-transcript pairs found in '{data_dir}'. Expected matching .mp4 and .txt files.")
+
+        # Deterministic sorting and train/val split
+        all_samples.sort(key=lambda x: x[0])
+        rng = np.random.RandomState(seed)
+        indices = rng.permutation(len(all_samples))
+
+        if val_split > 0.0 and len(all_samples) > 1:
+            val_count = max(1, int(len(all_samples) * val_split))
+            if val_count >= len(all_samples):
+                val_count = len(all_samples) - 1
+            if split == "val":
+                selected_indices = indices[:val_count]
+            else:
+                selected_indices = indices[val_count:]
+        else:
+            selected_indices = indices
+
+
+        self.samples = [all_samples[i] for i in selected_indices]
+        print(f"[HindiVideoDataset] Loaded {len(self.samples)} samples for '{split}' split from '{data_dir}'.")
 
     def __len__(self):
-        return len(self.video_paths)
+        return len(self.samples)
 
-    def __getitem__(self, idx):
-        # Retry logic if the sample is invalid
-        max_retries = 3
-        retries = 0
+    def _read_transcript(self, txt_path: str) -> str:
+        with open(txt_path, 'r', encoding='utf-8') as f:
+            lines = [line.strip() for line in f if line.strip()]
+            return " ".join(lines)
 
-        while retries < max_retries:
-            video_path = self.video_paths[idx]
-            label = self.labels[idx]
+    def _load_video_frames(self, video_path: str) -> np.ndarray:
+        """Loads video and samples num_frames evenly, applying stabilized face crop."""
+        vr = None
+        frame_count = 0
 
-            video = load_and_preprocess_video(video_path, self.num_frames)
+        if HAS_DECORD:
+            try:
+                vr = VideoReader(video_path, ctx=cpu(0), num_threads=2)
+                frame_count = len(vr)
+            except Exception:
+                vr = None
 
-            # If the video is None, try the next one (increment index)
-            if video is None:
-                retries += 1
-                idx = (idx + 1) % len(self.video_paths)  # Increment index to the next item
-                continue
+        if vr is None:
+            # Fallback to OpenCV VideoCapture
+            cap = cv2.VideoCapture(video_path)
+            frames_raw = []
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                frames_raw.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            cap.release()
+            frame_count = len(frames_raw)
+            vr = frames_raw
 
-            video_tensor = torch.tensor(video).permute(0, 3, 1, 2)  # Convert to (T, C, H, W)
 
-            # Get phoneme indices for the label using the pronouncing library
-            phonemes = get_phonemes(label)
-            # print(phonemes)
-            phoneme_indices = [self.phoneme_vocab.get(phoneme) for phoneme in phonemes if phoneme in self.phoneme_vocab]
+        if frame_count < 1:
+            return None
 
-            # If any phoneme was unknown or invalid, try the next item
-            if len(phoneme_indices) == 0:
-                retries += 1
-                idx = (idx + 1) % len(self.video_paths)
-                continue
+        # Evenly sample frame indices
+        if frame_count >= self.num_frames:
+            sample_indices = np.linspace(0, frame_count - 1, self.num_frames, dtype=int)
+        else:
+            sample_indices = np.pad(
+                np.arange(frame_count),
+                (0, self.num_frames - frame_count),
+                mode='edge'
+            )
 
-            phoneme_tensor = torch.tensor(phoneme_indices)
+        sampled_frames = []
+        for idx in sample_indices:
+            if isinstance(vr, list):
+                frame = vr[idx]
+            else:
+                frame = vr[idx].asnumpy()
+            sampled_frames.append(frame)
 
-            # print(phoneme_tensor)
-            # print(label)
+        # Apply face cropping with bounding box stabilization
+        processed_frames = []
+        last_valid_crop = None
 
-            return video_tensor, phoneme_tensor
+        for frame in sampled_frames:
+            cropped = None
+            if self.face_cropper is not None:
+                try:
+                    faces = self.face_cropper.get_faces(frame, remove_background=False, correct_roll=True)
+                    if faces and len(faces) > 0 and faces[0].size > 0:
+                        cropped = faces[0]
+                        last_valid_crop = cropped
+                except Exception:
+                    pass
 
-        # If max retries exceeded, raise an error
-        raise ValueError(f"Exceeded max retries for video at index {idx}")
+            if cropped is None:
+                # Reuse last valid face crop if available to prevent jitter scale jump
+                if last_valid_crop is not None:
+                    cropped = last_valid_crop
+                else:
+                    cropped = frame
 
-def load_and_preprocess_video(video_path, num_frames):
-    try:
-        vr = VideoReader(video_path, ctx=cpu(0), num_threads=4)
-    except Exception as e:
-        print(f"Error loading video: {video_path}. Error: {e}")
-        return None
+            cropped = cv2.resize(cropped, self.frame_size)
+            processed_frames.append(cropped)
 
-    frame_count = len(vr)
-    sample_indices = np.linspace(0, frame_count - 1, num_frames).astype(int)
+        video_np = np.stack(processed_frames, axis=0)  # (T, H, W, C)
+        return video_np
 
-    frames = []
-    for idx in sample_indices:
-        frame = vr[idx].asnumpy()
-        frames.append(frame)
+    def __getitem__(self, idx: int):
+        video_path, txt_path = self.samples[idx]
 
-    if len(frames) < num_frames:
-        return None
+        # 1. Load and process video frames
+        video_np = self._load_video_frames(video_path)
+        if video_np is None:
+            # Return dummy on failure
+            video_np = np.zeros((self.num_frames, self.frame_size[1], self.frame_size[0], 3), dtype=np.uint8)
 
-    video_np = np.array(frames)  # (T, H, W, C)
-    return video_np
+        # Convert to Tensor (T, C, H, W) in range [0, 1]
+        video_tensor = torch.from_numpy(video_np).permute(0, 3, 1, 2).float() / 255.0
 
-def get_phonemes(word):
+        # 2. Load transcript and convert to Hindi phonemes
+        text = self._read_transcript(txt_path)
+        phoneme_tokens = devanagari_to_phonemes(text)
+
+        # Map to vocabulary indices
+        phoneme_indices = [
+            self.phoneme_vocab[token]
+            for token in phoneme_tokens
+            if token in self.phoneme_vocab
+        ]
+
+        # Ensure target sequence is non-empty
+        if len(phoneme_indices) == 0:
+            phoneme_indices = [self.phoneme_vocab.get('A', 1)]
+
+        phoneme_tensor = torch.tensor(phoneme_indices, dtype=torch.long)
+
+        return video_tensor, phoneme_tensor, text
+
+
+def custom_collate(batch, phoneme_vocab):
     """
-    Use the 'pronouncing' library to convert the word into phonemes, removing any numbers from phonemes.
-
-    Args:
-        word (str): Input word to convert to phonemes.
-
-    Returns:
-        list: List of phonemes corresponding to the input word with numbers removed.
+    Custom collator for HindiVideoDataset.
+    Stacks videos and packs phoneme labels. Filters empty items.
     """
-    word = word.lower()
-    phones = pronouncing.phones_for_word(word)  # Get phonemes for the word
-    if phones:
-        # Remove any numbers from phonemes using regex
-        return [re.sub(r'\d+', '', phoneme) for phoneme in phones[0].split()]  # Return phonemes for the first pronunciation
-    else:
-        return []  # Return empty list if no phoneme is found
+    valid_batch = [item for item in batch if item is not None and item[0] is not None]
+    if len(valid_batch) == 0:
+        return torch.empty(0), [], []
+
+    videos, labels, texts = zip(*valid_batch)
+    videos_tensor = torch.stack(videos)  # (B, T, C, H, W)
+    label_tensors = [l.clone().detach() for l in labels]
+
+    return videos_tensor, label_tensors, list(texts)
+
+
+# Backward compatibility alias
+VideoDataset = HindiVideoDataset

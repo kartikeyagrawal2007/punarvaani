@@ -1,11 +1,16 @@
-import configargparse
+try:
+    import configargparse as argparse_lib
+except ImportError:
+    import argparse as argparse_lib
+
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import csv
 import numpy as np
 
 def load_args():
-    parser = configargparse.ArgumentParser(description="Main")
+    parser = argparse_lib.ArgumentParser(description="Main")
+
 
     # Device configuration
     parser.add_argument('--device', type=str, default='cuda', help="Device to use for computation ('cuda' or 'cpu')")
@@ -35,61 +40,78 @@ def load_args():
     # parser.add_argument('--frame_size', type=int, default=224, help="Resize the input video frames to this resolution")
     # parser.add_argument('--videos_output', type=str, help="Output directory for the preporcessed video dataset")
 
+    # Custom dataset and Hindi VSR configuration
+    parser.add_argument('--data_dir', type=str, default=None, help="Root directory containing paired video files (dataXXX.mp4) and transcripts (dataXXX.txt)")
+    parser.add_argument('--val_dir', type=str, default=None, help="Optional separate directory for validation data")
+    parser.add_argument('--val_split', type=float, default=0.1, help="Fraction of data used for validation when using a single data_dir")
+    parser.add_argument('--num_frames', type=int, default=16, help="Number of frames sampled per video clip")
+    parser.add_argument('--infer_video_path', type=str, default=None, help="Path to video file for inference")
+    parser.add_argument('--language', type=str, choices=['hindi', 'english'], default='hindi', help="Target language vocabulary ('hindi' or 'english')")
+    parser.add_argument('--crop_face', action='store_true', default=True, help="Use MediaPipe FaceCropper to crop face/mouth region")
+
+    # Stage 2 LLM (Sarvam-1) configuration
+    parser.add_argument('--sarvam_adapter_path', type=str, default=None, help="Path to directory containing fine-tuned Sarvam-1 LoRA adapter weights")
+    parser.add_argument('--sarvam_base_model', type=str, default="sarvamai/sarvam-1", help="Hugging Face base model ID for Sarvam")
+
     # Training and inference parameters
-    parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs")
-    parser.add_argument('--sample_size', type=float, default=1, help="Percentage of the dataset to use for training")
-    parser.add_argument('--mode', type=str, choices=['train', 'infer', 'WER'], help="Mode to run the script: 'train', 'infer' or 'WER'")
-    # parser.add_argument('--infer_video_path', type=str, help="Path to the video file for inference")
-    # parser.add_argument('--num_classes', type=int, help="Number of classes for the classifier")
+    parser.add_argument('--epochs', type=int, default=20, help="Number of training epochs")
+    parser.add_argument('--sample_size', type=float, default=1.0, help="Percentage of the dataset to use for training")
+    parser.add_argument('--mode', type=str, choices=['train', 'infer', 'eval'], default='train', help="Mode to run: 'train', 'infer' or 'eval'")
 
     args = parser.parse_args()
 
     return args
 
-def get_vocab():
+def get_hindi_vocab():
+    """
+    Standard 55-class Hindi Phoneme Inventory (HPI) for Visual Speech Recognition.
+    0: <pad> (CTC blank token)
+    1: | (Word boundary delimiter)
+    2-54: Hindi vowels, consonants, flaps, loans.
+    """
+    hindi_vocab = {
+        '<pad>': 0,     # CTC blank token
+        '|': 1,         # Word boundary delimiter
+        # Vowels
+        'A': 2, 'AA': 3, 'I': 4, 'II': 5, 'U': 6, 'UU': 7,
+        'E': 8, 'AI': 9, 'O': 10, 'AU': 11, 'RI': 12, 'AN': 13, 'AH': 14,
+        # Velar
+        'K': 15, 'KH': 16, 'G': 17, 'GH': 18, 'NG': 19,
+        # Palatal
+        'CH': 20, 'CHH': 21, 'J': 22, 'JH': 23, 'NY': 24,
+        # Retroflex
+        'TR': 25, 'THR': 26, 'DR': 27, 'DHR': 28, 'NR': 29,
+        'RD': 30, 'RHD': 31, # Flaps: ड़, ढ़
+        # Dental
+        'TD': 32, 'THD': 33, 'DD': 34, 'DHD': 35, 'N': 36,
+        # Labial
+        'P': 37, 'PH': 38, 'B': 39, 'BH': 40, 'M': 41,
+        # Approximants / Semivowels
+        'Y': 42, 'R': 43, 'L': 44, 'V': 45,
+        # Sibilants / Fricatives
+        'SH': 46, 'SHR': 47, 'S': 48, 'H': 49,
+        # Loan / Nuqta Consonants
+        'Q': 50, 'KH_LOAN': 51, 'GH_LOAN': 52, 'Z': 53, 'F': 54
+    }
+    return hindi_vocab
+
+def get_vocab(language="hindi"):
+    if language == "hindi":
+        return get_hindi_vocab()
+
+    # Legacy English ARPAbet vocab
     phoneme_vocab = {
         '<pad>': 0, # Blank token for CTC loss       
-        'AA': 1,  # Example: odd -> AA D
-        'AE': 2,  # Example: at -> AE T
-        'AH': 3,  # Example: hut -> HH AH T
-        'AO': 4,  # Example: ought -> AO T
-        'AW': 5,  # Example: cow -> K AW
-        'AY': 6, # Example: hide -> HH AY D
-        'B': 7,  # Example: be -> B IY
-        'CH': 8, # Example: cheese -> CH IY Z
-        'D': 9,  # Example: dee -> D IY
-        'DH': 10, # Example: thee -> DH IY
-        'EH': 11, # Example: Ed -> EH D
-        'ER': 12, # Example: hurt -> HH ER T
-        'EY': 13, # Example: ate -> EY T
-        'F': 14,  # Example: fee -> F IY
-        'G': 15,  # Example: green -> G R IY N
-        'HH': 16, # Example: he -> HH IY
-        'IH': 17, # Example: it -> IH T
-        'IY': 18, # Example: eat -> IY T
-        'JH': 19, # Example: gee -> JH IY
-        'K': 20,  # Example: key -> K IY
-        'L': 21,  # Example: lee -> L IY
-        'M': 22,  # Example: me -> M IY
-        'N': 23,  # Example: knee -> N IY
-        'NG': 24, # Example: ping -> P IH NG
-        'OW': 25, # Example: oat -> OW T
-        'OY': 26, # Example: toy -> T OY
-        'P': 27,  # Example: pee -> P IY
-        'R': 28,  # Example: read -> R IY D
-        'S': 29,  # Example: sea -> S IY
-        'SH': 30, # Example: she -> SH IY
-        'T': 31,  # Example: tea -> T IY
-        'TH': 32, # Example: theta -> TH EY T AH
-        'UH': 33, # Example: hood -> HH UH D
-        'UW': 34, # Example: two -> T UW
-        'V': 35,  # Example: vee -> V IY
-        'W': 36,  # Example: we -> W IY
-        'Y': 37,  # Example: yield -> Y IY L D
-        'Z': 38,  # Example: zee -> Z IY
-        'ZH': 39  # Example: seizure -> S IY ZH ER
+        'AA': 1, 'AE': 2, 'AH': 3, 'AO': 4, 'AW': 5, 'AY': 6,
+        'B': 7, 'CH': 8, 'D': 9, 'DH': 10, 'EH': 11, 'ER': 12,
+        'EY': 13, 'F': 14, 'G': 15, 'HH': 16, 'IH': 17, 'IY': 18,
+        'JH': 19, 'K': 20, 'L': 21, 'M': 22, 'N': 23, 'NG': 24,
+        'OW': 25, 'OY': 26, 'P': 27, 'R': 28, 'S': 29, 'SH': 30,
+        'T': 31, 'TH': 32, 'UH': 33, 'UW': 34, 'V': 35, 'W': 36,
+        'Y': 37, 'Z': 38, 'ZH': 39
     }
     return phoneme_vocab
+
 
 class WarmupScheduler:
     def __init__(self, optimizer, warmup_steps, base_lr, target_lr, after_scheduler=None):

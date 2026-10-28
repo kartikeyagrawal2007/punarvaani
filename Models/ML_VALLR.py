@@ -276,6 +276,37 @@ class VALLR(nn.Module):
         # 4) CTC logits
         logits = self.ctc_head(adapted)             # (B, N_down, num_classes)
 
-        # print("Logits shape", logits.shape)
-
         return logits, adapted
+
+    @staticmethod
+    def decode_ctc(logits: torch.Tensor, vocab: dict, blank_id: int = 0):
+        """
+        Greedy CTC decoding: collapses repeats and removes blank tokens.
+        Args:
+            logits: Tensor of shape (B, T, num_classes)
+            vocab: Dict mapping phoneme str -> int ID
+            blank_id: Integer token ID for blank (default: 0)
+        Returns:
+            List[str]: Decoded phoneme sequence per batch item e.g. ['N M S TD E', ...]
+        """
+        reverse_vocab = {v: k for k, v in vocab.items()}
+        preds = torch.argmax(logits, dim=-1)  # (B, T)
+        batch_results = []
+
+        for b in range(preds.size(0)):
+            seq = preds[b].tolist()
+            decoded = []
+            prev_token = None
+            for token_id in seq:
+                if token_id != blank_id and token_id != prev_token:
+                    phoneme = reverse_vocab.get(token_id, "")
+                    if phoneme and phoneme != "<pad>":
+                        decoded.append(phoneme)
+                prev_token = token_id
+            batch_results.append(" ".join(decoded))
+
+        return batch_results
+
+
+# Alias for backward compatibility
+ML_VALLR = VALLR

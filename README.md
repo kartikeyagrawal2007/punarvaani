@@ -1,4 +1,4 @@
-# [ICCV 2025] VALLR: Visual ASR Language Model for Lip Reading
+# [ICCV 2025] PUNARVAANI: Visual ASR Language Model for Lip Reading
 
 
 <img width="1210" height="506" alt="image" src="https://github.com/user-attachments/assets/938343fb-9ede-4c0c-9f12-db417c044e3a" />
@@ -10,7 +10,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2503.21408-b31b1b.svg)](https://arxiv.org/abs/2503.21408) 
 [![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc]
 
-VALLR is a novel two-stage, phoneme-centric framework for **Visual Automatic Speech Recognition (VASR)** that achieves state-of-the-art performance in lip reading. This approach significantly reduces **Word Error Rate (WER)** by first predicting a sequence of phonemes from visual inputs and then using a fine-tuned **Large Language Model (LLM)** to reconstruct coherent words and sentences. This repository contains the official PyTorch implementation of the VALLR model, along with tools for data preprocessing and inference.
+PUNARVAANI is a novel two-stage, phoneme-centric framework for **Visual Automatic Speech Recognition (VASR)** that achieves state-of-the-art performance in lip reading. This approach significantly reduces **Word Error Rate (WER)** by first predicting a sequence of phonemes from visual inputs and then using a fine-tuned **Large Language Model (LLM)** to reconstruct coherent words and sentences. This repository contains the official PyTorch implementation of the PUNARVAANI model, along with tools for data preprocessing and inference.
 
 ---
 
@@ -18,7 +18,7 @@ VALLR is a novel two-stage, phoneme-centric framework for **Visual Automatic Spe
 
 * **State-of-the-Art Performance**: Achieves a SOTA WER of **18.7% on the LRS3 dataset**, outperforming existing methods.
 * **Two-Stage Framework**: Decouples the visual feature extraction from linguistic modeling, leading to improved accuracy and data efficiency.
-* **Phoneme-Centric Approach**: By predicting phonemes as an intermediate representation, VALLR effectively handles the ambiguities of visemes and coarticulation effects.
+* **Phoneme-Centric Approach**: By predicting phonemes as an intermediate representation, PUNARVAANI effectively handles the ambiguities of visemes and coarticulation effects.
 * **Data Efficient**: Requires **99.4% less labeled data** than the next best approach, making it highly practical for real-world applications without the need for self-supervised pre-training.
 * **Modular Design**: The codebase is organized into distinct components for data processing, model architecture, and inference pipelines, allowing for easy customization and extension.
 
@@ -26,7 +26,7 @@ VALLR is a novel two-stage, phoneme-centric framework for **Visual Automatic Spe
 
 ### Model Architecture
 
-The VALLR model consists of two main components:
+The PUNARVAANI model consists of two main components:
 
 1.  **Video-to-Phoneme Network**: A Video Transformer with a CTC head that takes video frames of a speaker's mouth as input and predicts a sequence of phonemes.
 2.  **Phoneme-to-Sentence LLM**: A fine-tuned Large Language Model (LLM) that takes the phoneme sequence as input and reconstructs the corresponding words and sentences.
@@ -37,7 +37,7 @@ This two-stage design allows the model to first learn the complex visual feature
 
 ### Results
 
-Here's a comparison of VALLR's performance against other state-of-the-art methods on the LRS3 and LRS2 datasets. Our method achieves SOTA performance on LRS3 using only the supervised training set, without any self-supervised pre-training.
+Here's a comparison of PUNARVAANI's performance against other state-of-the-art methods on the LRS3 and LRS2 datasets. Our method achieves SOTA performance on LRS3 using only the supervised training set, without any self-supervised pre-training.
 
 #### LRS3 Dataset Comparison
 
@@ -78,8 +78,8 @@ Here's a comparison of VALLR's performance against other state-of-the-art method
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/MarshallT-99/VALLR.git](https://github.com/MarshallT-99/VALLR.git)
-    cd VALLR
+    git clone [https://github.com/MarshallT-99/PUNARVAANI.git](https://github.com/MarshallT-99/PUNARVAANI.git)
+    cd PUNARVAANI
     ```
 2.  Install the required packages:
     ```bash
@@ -91,7 +91,7 @@ Here's a comparison of VALLR's performance against other state-of-the-art method
 To run inference on a single video, use the `infer` mode and provide the path to the trained model and the video file.
 
 1.  **Download the pretrained model weights**:
-    * [Download VALLR Model Weights from Google Drive](https://drive.google.com/file/d/14u7MRTxXL1psHMnlssw_Drq-zRMGC7zD/view?usp=sharing)
+    * [Download PUNARVAANI Model Weights from Google Drive](https://drive.google.com/file/d/14u7MRTxXL1psHMnlssw_Drq-zRMGC7zD/view?usp=sharing)
 
 2.  **Run inference**:
     ```bash
@@ -107,7 +107,7 @@ To run inference on a single video, use the `infer` mode and provide the path to
 ### Codebase Overview
 
 * **`main.py`**: The main script for running inference.
-* **`Models/ML_VALLR.py`**: Contains the implementation of the VALLR model.
+* **`Models/ML_VALLR.py`**: Contains the implementation of the PUNARVAANI model.
 * **`Data/dataset.py`**: The `VideoDataset` class for loading and preprocessing video data.
 * **`face_cropper.py`**: A utility for detecting and cropping faces from video frames using MediaPipe.
 * **`config.py`**: Configuration file for setting hyperparameters and other settings.
@@ -117,11 +117,11 @@ To run inference on a single video, use the `infer` mode and provide the path to
 
 ### Citation
 
-If you use this code or the VALLR model in your research, please cite the following paper:
+If you use this code or the PUNARVAANI model in your research, please cite the following paper:
 
 ```
 @article{thomas2025vallr,
-  title={VALLR: Visual ASR Language Model for Lip Reading},
+  title={PUNARVAANI: Visual ASR Language Model for Lip Reading},
   author={Thomas, Marshall and Fish, Edward and Bowden, Richard},
   journal={arXiv preprint arXiv:2503.21408},
   year={2025}
