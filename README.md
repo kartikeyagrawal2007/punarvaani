@@ -1,138 +1,201 @@
-# [ICCV 2025] PUNARVAANI: Visual ASR Language Model for Lip Reading
+# Punarvaani (पुनर्वाणी): Visual Speech Recognition for Hindi
 
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
+[![PyTorch: 2.4+](https://img.shields.io/badge/PyTorch-2.4+-ee4c2c.svg)](https://pytorch.org/)
+[![Base Architecture: VALLR (ICCV 2025)](https://img.shields.io/badge/Based%20On-VALLR%20(ICCV%202025)-red.svg)](https://arxiv.org/abs/2503.21408)
 
-<img width="1210" height="506" alt="image" src="https://github.com/user-attachments/assets/938343fb-9ede-4c0c-9f12-db417c044e3a" />
-
-[Marshall Thomas](https://www.surrey.ac.uk/people/marshall-thomas ), [Edward Fish](https://ed-fish.github.io/), [Richard Bowden](https://www.surrey.ac.uk/people/richard-bowden)
-
-
-
-[![arXiv](https://img.shields.io/badge/arXiv-2503.21408-b31b1b.svg)](https://arxiv.org/abs/2503.21408) 
-[![CC BY-NC 4.0][cc-by-nc-shield]][cc-by-nc]
-
-PUNARVAANI is a novel two-stage, phoneme-centric framework for **Visual Automatic Speech Recognition (VASR)** that achieves state-of-the-art performance in lip reading. This approach significantly reduces **Word Error Rate (WER)** by first predicting a sequence of phonemes from visual inputs and then using a fine-tuned **Large Language Model (LLM)** to reconstruct coherent words and sentences. This repository contains the official PyTorch implementation of the PUNARVAANI model, along with tools for data preprocessing and inference.
+> **Punarvaani** (*Punar* = Re-/Restore, *Vaani* = Voice/Speech) is an end-to-end, two-stage **Visual Automatic Speech Recognition (VASR) / Lip-Reading system tailored for the Hindi language**. By reading silent mouth movements from video, Punarvaani predicts Hindi phoneme sequences and uses an Indic Large Language Model to restore complete, grammatically fluent Devanagari Hindi speech.
 
 ---
 
-### Key Features
+## 🙏 Acknowledgments & Foundational Architecture
 
-* **State-of-the-Art Performance**: Achieves a SOTA WER of **18.7% on the LRS3 dataset**, outperforming existing methods.
-* **Two-Stage Framework**: Decouples the visual feature extraction from linguistic modeling, leading to improved accuracy and data efficiency.
-* **Phoneme-Centric Approach**: By predicting phonemes as an intermediate representation, PUNARVAANI effectively handles the ambiguities of visemes and coarticulation effects.
-* **Data Efficient**: Requires **99.4% less labeled data** than the next best approach, making it highly practical for real-world applications without the need for self-supervised pre-training.
-* **Modular Design**: The codebase is organized into distinct components for data processing, model architecture, and inference pipelines, allowing for easy customization and extension.
+**Punarvaani** is built upon the pioneering research and architectural framework of **VALLR** (**V**isual **A**SR **L**anguage Model for **L**ip **R**eading), published at **ICCV 2025**:
 
----
+> **[ICCV 2025] VALLR: Visual ASR Language Model for Lip Reading**  
+> *Marshall Thomas, Edward Fish, Richard Bowden (University of Surrey)*  
+> 📄 **Paper:** [arXiv:2503.21408](https://arxiv.org/abs/2503.21408)  
+> 🔗 **Original Repository:** [MarshallT-99/VALLR](https://github.com/MarshallT-99/VALLR)
 
-### Model Architecture
+### Our Respect & Gratitude to the Creators of VALLR
+We extend our deepest gratitude to Marshall Thomas, Edward Fish, and Prof. Richard Bowden for their breakthrough research. Prior to VALLR, lip-reading models required thousands of hours of self-supervised video pre-training and struggled heavily with *viseme ambiguity* (different sounds producing identical mouth shapes). 
 
-The PUNARVAANI model consists of two main components:
+The VALLR authors revolutionized the field by demonstrating that **decoupling visual phoneme recognition from linguistic sentence reconstruction** achieves state-of-the-art accuracy with **99.4% less labeled training data**. 
 
-1.  **Video-to-Phoneme Network**: A Video Transformer with a CTC head that takes video frames of a speaker's mouth as input and predicts a sequence of phonemes.
-2.  **Phoneme-to-Sentence LLM**: A fine-tuned Large Language Model (LLM) that takes the phoneme sequence as input and reconstructs the corresponding words and sentences.
-
-This two-stage design allows the model to first learn the complex visual features of speech and then leverage the linguistic knowledge of an LLM to generate coherent text.
-
----
-
-### Results
-
-Here's a comparison of PUNARVAANI's performance against other state-of-the-art methods on the LRS3 and LRS2 datasets. Our method achieves SOTA performance on LRS3 using only the supervised training set, without any self-supervised pre-training.
-
-#### LRS3 Dataset Comparison
-
-| Method | Unlabeled (hrs) | Labeled (hrs) | WER (%) |
-| :--- | :---: | :---: | :---: |
-| **Self-supervised pre-training + Supervised fine-tuning** | | | |
-| AV-HuBERT Large [44] | 1,759 | 30 | 32.5 |
-| Lip2Vec [12] | 1,759 | 30 | 31.2 |
-| Whisper [41] | 1,759 | 30 | 25.5 |
-| RAVEn [18] | 1759 | 433 | 23.1 |
-| USR [19] | 1,326 | 433 | 21.5 |
-| **Supervised fine-tuning only** | | | |
-| **Ours** | **-** | **30** | **18.7** |
-
-#### LRS2 Dataset Comparison
-
-| Method | Unlabeled (hrs) | Labeled (hrs) | WER (%) |
-| :--- | :---: | :---: | :---: |
-| **Self-supervised pre-training + Supervised fine-tuning** | | | |
-| Sub-Word [40] | 2,676 | 2,676 | 22.6 |
-| RAVEn [18] | 1,759 | 223 | 17.9 |
-| USR [19] | 1,759 | 223 | 15.4 |
-| **Supervised fine-tuning only** | | | |
-| **Ours** | **-** | **28** | **20.8** |
-
----
----
-
-### Getting Started
-
-#### Prerequisites
-
-* Python 3.10 or higher
-* PyTorch 2.4.1
-* Other dependencies listed in `requirements.txt`
-
-#### Installation
-
-1.  Clone the repository:
-    ```bash
-    git clone [https://github.com/MarshallT-99/PUNARVAANI.git](https://github.com/MarshallT-99/PUNARVAANI.git)
-    cd PUNARVAANI
-    ```
-2.  Install the required packages:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-### Inference
-
-To run inference on a single video, use the `infer` mode and provide the path to the trained model and the video file.
-
-1.  **Download the pretrained model weights**:
-    * [Download PUNARVAANI Model Weights from Google Drive](https://drive.google.com/file/d/14u7MRTxXL1psHMnlssw_Drq-zRMGC7zD/view?usp=sharing)
-
-2.  **Run inference**:
-    ```bash
-    python main.py --mode infer --model_path /path/to/your/downloaded/model.pth --infer_video_path /path/to/your/video.mp4
-    ```
-3.  **Train mode**:
-    ```bash
-    python3 main.py --mode train --version V1 --save_model_path path/to/model --videos_root path/to/videos
-    ```
+**Punarvaani** honors and extends this foundational work by bringing this state-of-the-art paradigm into the **Indic linguistic ecosystem**, introducing:
+1. A **55-class Hindi Phonetic Inventory (HPI)** and rule-based Hindi Grapheme-to-Phoneme engine with Schwa Deletion.
+2. An adapted **Spatiotemporal ViT CTC model** trained on Hindi visual speech.
+3. An Indic Large Language Model (**Sarvam-1**) fine-tuned via LoRA for phoneme-to-Devanagari text reconstruction.
 
 ---
 
-### Codebase Overview
+## 🌟 The End Product: What Happens After Dataset, Training & LLM Fine-Tuning?
 
-* **`main.py`**: The main script for running inference.
-* **`Models/ML_VALLR.py`**: Contains the implementation of the PUNARVAANI model.
-* **`Data/dataset.py`**: The `VideoDataset` class for loading and preprocessing video data.
-* **`face_cropper.py`**: A utility for detecting and cropping faces from video frames using MediaPipe.
-* **`config.py`**: Configuration file for setting hyperparameters and other settings.
-
----
-
-
-### Citation
-
-If you use this code or the PUNARVAANI model in your research, please cite the following paper:
+When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM is fine-tuned, **Punarvaani becomes a complete "silent speech-to-text" engine**. 
 
 ```
+┌─────────────────┐      ┌─────────────────────────┐      ┌─────────────────────────┐      ┌─────────────────────────┐
+│   SILENT VIDEO  │      │  PREPROCESSING & CROP   │      │ STAGE 1: VISION-TO-CTC  │      │ STAGE 2: SARVAM-1 LLM   │
+│                 │ ───► │                         │ ───► │                         │ ───► │                         │
+│ Speaker talking │      │ MediaPipe Face Mesh     │      │ Spatiotemporal ViT      │      │ Indic Language Model    │
+│ without audio   │      │ Isolates 16 mouth crops │      │ Outputs Hindi Phonemes  │      │ Reconstructs Sentences  │
+└─────────────────┘      └─────────────────────────┘      └─────────────────────────┘      └─────────────────────────┘
+                                                                       │                                │
+                                                                       ▼                                ▼
+                                                            Predicted Phonemes:                 Final Transcription:
+                                                            "N M S TD E | BH AA R TD"            "नमस्ते भारत"
+```
+
+### The Step-by-Step Inference Journey
+
+1. **Input: Silent Video Feed**  
+   The user supplies a video of a person speaking Hindi without any audio track (e.g., silent CCTV, high-noise factory/cockpit footage, silent speech from aphonic individuals, or a muted video call).
+
+2. **Step 1: Intelligent Mouth Tracking & ROI Isolation (`face_cropper.py`)**  
+   MediaPipe Face Mesh detects facial landmarks across the video clip. It tracks the lips regardless of minor head rotations, crops the mouth region of interest (ROI) to $224 \times 224$ pixels, and samples a normalized sequence of 16 frames.
+
+3. **Step 2: Spatiotemporal Visual Recognition (`ML_VALLR`)**  
+   The cropped mouth frames are passed through the 3D tubelet-convolutional Vision Transformer (ViT). The model evaluates subtle kinematic muscle movements (opening, rounded lips, tongue presses, dental contact) and emits frame-wise logits over the 55 Hindi phonetic classes. Greedy/beam CTC decoding resolves these into a clean phoneme string:
+   $$\text{Video Frames} \xrightarrow{\text{ViT + CTC}} \texttt{N M S TD E | BH AA R TD}$$
+
+4. **Step 3: Linguistic Resolution via Fine-Tuned LLM (`Models/Sarvam.py`)**  
+   In visual speech, many sounds look identical on the lips—for example, **/P/**, **/B/**, and **/M/** are all bilabial closures and visual twins (visemes). Visuals alone cannot distinguish "बात" (*baat*) from "पात" (*paat*).  
+   
+   This is where the fine-tuned **Sarvam-1 Indic LLM** acts as the system's linguistic brain:
+   * It takes the noisy phoneme stream as a prompt:
+     ```text
+     <S2S>
+     <PHONEMES>
+     N M S TD E | BH AA R TD
+     </PHONEMES>
+     <TEXT>
+     ```
+   * Leveraging its deep prior knowledge of Hindi syntax, vocabulary, and grammar, it corrects phonetic ambiguity and restores proper spelling and matras.
+
+5. **Output: Coherent Devanagari Hindi Text**  
+   The end product instantly returns the decoded Hindi transcript:
+   $$\mathbf{नमस्ते\ भारत}$$
+
+---
+
+## 🏛️ System Architecture
+
+| Component | Architecture / Technology | Role in Punarvaani |
+| :--- | :--- | :--- |
+| **Face & Lip Cropper** | MediaPipe Face Landmark Detection | Stabilizes, normalizes, and crops speaker mouth frames |
+| **G2P Engine** | Pure-Python Devanagari Rule-based G2P | Handles Hindi Schwa Deletion (*Schwa Vilopa*) and 55 phoneme mappings |
+| **Stage 1: Vision Model** | Spatiotemporal ViT (Conv3D Tubelet + 1D Adapter + CTC) | Translates silent lip movements into raw Hindi phoneme sequences |
+| **Stage 2: Language Model** | `sarvamai/sarvam-1` (2 Billion Parameters + LoRA) | Translates raw phoneme sequences into natural Devanagari text |
+
+---
+
+## 📁 Repository Structure
+
+```text
+Punarvaani/
+├── config.py                 # Configuration arguments, hyperparameters & 55-class Hindi vocab
+├── main.py                   # Unified CLI for training (Stage 1) and end-to-end inference
+├── face_cropper.py           # MediaPipe-based face and mouth region detector
+├── requirements.txt          # Python dependencies
+│
+├── Data/
+│   ├── dataset.py            # Video dataset loader, collation, and frame sampler
+│   └── hindi_g2p.py          # Hindi Grapheme-to-Phoneme converter with Schwa Deletion
+│
+├── Models/
+│   ├── ML_VALLR.py           # Spatiotemporal ViT with tubelet embeddings & CTC head
+│   ├── Sarvam.py             # Sarvam-1 connector (with MOCK fallback & LoRA mounting)
+│   ├── VALLR.py              # Classic VALLR (VideoMAE + Wav2Vec2 CTC) implementation
+│   └── Llama.py              # Reference LLM fine-tuning scripts
+│
+├── hindi_dataset/            # Directory for paired video files and Devanagari text transcripts
+│   ├── README.md             # Dataset instructions
+│   ├── sample001.mp4
+│   └── sample001.txt
+│
+└── checkpoints/
+    └── sarvam_lora/          # Target folder for fine-tuned Sarvam-1 LoRA weights
+        └── README.md
+```
+
+---
+
+## 🚀 Quickstart Guide
+
+### 1. Prerequisites & Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/MarshallT-99/VALLR.git Punarvaani
+cd Punarvaani
+
+# Install required dependencies
+pip install -r requirements.txt
+```
+
+### 2. Preparing the Hindi Dataset
+
+Store paired video files and text transcripts in `hindi_dataset/`:
+* `sample001.mp4` (video clip of speaker's face)
+* `sample001.txt` (UTF-8 encoded Devanagari text: e.g. `नमस्ते भारत`)
+
+### 3. Training Stage 1 (Video-to-Phoneme CTC Model)
+
+Train the visual feature extractor and CTC head on your Hindi dataset:
+
+```bash
+python main.py \
+  --mode train \
+  --language hindi \
+  --data_dir ./hindi_dataset \
+  --save_model_path ./checkpoints/punarvaani_stage1.pth \
+  --epochs 25 \
+  --batch_size 16 \
+  --num_frames 16
+```
+
+### 4. Running End-to-End Inference
+
+Once you have trained the Stage 1 model and placed your fine-tuned Sarvam-1 LoRA weights in `checkpoints/sarvam_lora/`, run end-to-end inference on any silent video:
+
+```bash
+python main.py \
+  --mode infer \
+  --infer_video_path ./test_video.mp4 \
+  --save_model_path ./checkpoints/punarvaani_stage1.pth \
+  --sarvam_adapter_path ./checkpoints/sarvam_lora
+```
+
+*(Note: If Sarvam-1 LoRA weights are still training, omitting `--sarvam_adapter_path` runs Stage 2 in safe MOCK mode so you can test Stage 1 independently).*
+
+---
+
+## 📚 Citations & Academic References
+
+If you use **Punarvaani** or build upon this work, please cite both the foundational **VALLR** paper and the **Sarvam-1** model:
+
+### Foundational Paper: VALLR (ICCV 2025)
+```bibtex
 @article{thomas2025vallr,
-  title={PUNARVAANI: Visual ASR Language Model for Lip Reading},
+  title={VALLR: Visual ASR Language Model for Lip Reading},
   author={Thomas, Marshall and Fish, Edward and Bowden, Richard},
   journal={arXiv preprint arXiv:2503.21408},
   year={2025}
 }
 ```
 
-This work is licensed under a
-[Creative Commons Attribution-NonCommercial 4.0 International License][cc-by-nc].
+### Indic Language Model: Sarvam-1
+```bibtex
+@article{sarvam2024sarvam1,
+  title={Sarvam-1: An Efficient 2B Language Model Optimized for Indic Languages},
+  author={Sarvam AI},
+  year={2024},
+  url={https://huggingface.co/sarvamai/sarvam-1}
+}
+```
 
-[![CC BY-NC 4.0][cc-by-nc-image]][cc-by-nc]
+---
 
-[cc-by-nc]: https://creativecommons.org/licenses/by-nc/4.0/
-[cc-by-nc-image]: https://licensebuttons.net/l/by-nc/4.0/88x31.png
-[cc-by-nc-shield]: https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg
+## 📄 License
+This repository is released under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**, preserving the academic and research-oriented spirit of the original VALLR implementation.
