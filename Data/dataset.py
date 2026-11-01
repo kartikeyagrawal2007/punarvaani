@@ -31,6 +31,8 @@ class HindiVideoDataset(Dataset):
         phoneme_vocab: dict,
         split: str = "train",
         val_split: float = 0.1,
+        sample_size: float = 1.0,
+        is_dedicated_split: bool = False,
         num_frames: int = 16,
         frame_size: tuple = (224, 224),
         crop_face: bool = True,
@@ -39,6 +41,7 @@ class HindiVideoDataset(Dataset):
         self.data_dir = data_dir
         self.phoneme_vocab = phoneme_vocab
         self.split = split
+        self.sample_size = sample_size
         self.num_frames = num_frames
         self.frame_size = frame_size
         self.crop_face = crop_face
@@ -53,7 +56,9 @@ class HindiVideoDataset(Dataset):
                     min_landmark_detector_confidence=0.5
                 )
             except Exception as e:
-                print(f"[Warning] Could not initialize FaceCropper: {e}. Falling back to standard resize.")
+                print(f"[Warning] Could not initialize FaceCropper: {e}. Falling back to center crop.")
+        elif self.crop_face and not HAS_FACE_CROPPER:
+            print("[Warning] FaceCropper (MediaPipe) not installed/available. Using center crop fallback.")
 
         if not os.path.exists(data_dir):
             raise FileNotFoundError(f"Data directory '{data_dir}' does not exist.")
@@ -76,12 +81,13 @@ class HindiVideoDataset(Dataset):
         if len(all_samples) == 0:
             raise ValueError(f"No valid video-transcript pairs found in '{data_dir}'. Expected matching .mp4 and .txt files.")
 
-        # Deterministic sorting and train/val split
+        # Deterministic sorting
         all_samples.sort(key=lambda x: x[0])
         rng = np.random.RandomState(seed)
         indices = rng.permutation(len(all_samples))
 
-        if val_split > 0.0 and len(all_samples) > 1:
+        # Train/val split handling (respects dedicated val directory)
+        if not is_dedicated_split and val_split > 0.0 and len(all_samples) > 1:
             val_count = max(1, int(len(all_samples) * val_split))
             if val_count >= len(all_samples):
                 val_count = len(all_samples) - 1
@@ -92,9 +98,13 @@ class HindiVideoDataset(Dataset):
         else:
             selected_indices = indices
 
+        # Subsampling via sample_size
+        if 0.0 < self.sample_size < 1.0:
+            sub_count = max(1, int(len(selected_indices) * self.sample_size))
+            selected_indices = selected_indices[:sub_count]
 
         self.samples = [all_samples[i] for i in selected_indices]
-        print(f"[HindiVideoDataset] Loaded {len(self.samples)} samples for '{split}' split from '{data_dir}'.")
+        print(f"[HindiVideoDataset] Loaded {len(self.samples)} samples for '{split}' split from '{data_dir}' (sample_size={self.sample_size}).")
 
     def __len__(self):
         return len(self.samples)
@@ -211,16 +221,71 @@ class HindiVideoDataset(Dataset):
         return video_tensor, phoneme_tensor, text
 
 
-def custom_collate(batch, phoneme_vocab):
+def check_speaker_leakage(train_samples, val_samples, speaker_extractor=None):
     """
-    Custom collator for HindiVideoDataset.
-    Stacks videos and packs phoneme labels. Filters empty items.
+    Checks for speaker identity leakage between train and validation sample sets.
+    Returns the set of speaker IDs that appear in both splits.
+    """
+    def default_extractor(item):
+        path = item[0] if isinstance(item, (tuple, list)) else str(item)
+        parent = os.path.basename(os.path.dirname(path))
+        base = os.path.splitext(os.path.basename(path))[0]
+        m_parent = re.match(r'^(?:spk|speaker)[-_]?([a-zA-Z0-9]+)', parent, re.IGNORECASE)
+        if m_parent:
+            return m_parent.group(0).lower()
+        m_base = re.match(r'^((?:spk|speaker)[-_]?[a-zA-Z0-9]+)', base, re.IGNORECASE)
+        if m_base:
+            return m_base.group(1).lower()
+        return parent.lower() if parent else base.lower()
+
+    extractor = speaker_extractor or default_extractor
+    train_speakers = {extractor(s) for s in train_samples}
+    val_speakers = {extractor(s) for s in val_samples}
+    return train_speakers.intersection(val_speakers)
+
+
+def verify_speaker_disjoint_split(train_samples, val_samples, speaker_extractor=None):
+    """
+    Raises ValueError if any speaker is present in both train and validation splits.
+    """
+    leakage = check_speaker_leakage(train_samples, val_samples, speaker_extractor)
+    if leakage:
+        raise ValueError(f"Speaker leakage detected! Speakers present in both train and val: {sorted(list(leakage))}")
+    return True
+
+
+def compute_ctc_min_length(label_tensor: torch.Tensor) -> int:
+    """Computes minimum CTC length U + R for a target label sequence."""
+    if len(label_tensor) == 0:
+        return 0
+    u = len(label_tensor)
+    r = int((label_tensor[:-1] == label_tensor[1:]).sum().item()) if u > 1 else 0
+    return u + r
+
+
+def custom_collate(batch, phoneme_vocab, t_ctc: int = 32):
+    """
+    Custom collator for HindiVideoDataset with per-sample CTC validity check (T >= U + R).
+    Stacks videos and packs phoneme labels. Excludes invalid samples.
+    If all samples are invalid or empty, returns (None, [], []).
     """
     valid_batch = [item for item in batch if item is not None and item[0] is not None]
     if len(valid_batch) == 0:
-        return torch.empty(0), [], []
+        return None, [], []
 
-    videos, labels, texts = zip(*valid_batch)
+    ctc_valid_batch = []
+    for item in valid_batch:
+        video, label, text = item
+        min_required = compute_ctc_min_length(label)
+        if t_ctc >= min_required:
+            ctc_valid_batch.append(item)
+        else:
+            print(f"[CTC Filter Warning] Sample with target len U={len(label)}, min_required={min_required} dropped (T_ctc={t_ctc})")
+
+    if len(ctc_valid_batch) == 0:
+        return None, [], []
+
+    videos, labels, texts = zip(*ctc_valid_batch)
     videos_tensor = torch.stack(videos)  # (B, T, C, H, W)
     label_tensors = [l.clone().detach() for l in labels]
 

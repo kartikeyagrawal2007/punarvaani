@@ -10,7 +10,28 @@ Features:
 
 import unicodedata
 import re
-from typing import List
+import logging
+from typing import List, Dict, Set, Tuple
+
+logger = logging.getLogger(__name__)
+
+# Diagnostics for unsupported characters
+UNSUPPORTED_CHAR_LOG: Dict[str, int] = {}
+AFFECTED_TRANSCRIPT_IDS: Set[str] = set()
+
+def get_unsupported_char_report() -> Dict[str, any]:
+    """Returns aggregated report of unsupported characters encountered during G2P."""
+    return {
+        "unsupported_characters": dict(UNSUPPORTED_CHAR_LOG),
+        "total_unsupported_occurrences": sum(UNSUPPORTED_CHAR_LOG.values()),
+        "affected_transcripts_count": len(AFFECTED_TRANSCRIPT_IDS),
+        "affected_transcript_ids": list(AFFECTED_TRANSCRIPT_IDS)
+    }
+
+def clear_unsupported_char_log():
+    """Clears diagnostic log."""
+    UNSUPPORTED_CHAR_LOG.clear()
+    AFFECTED_TRANSCRIPT_IDS.clear()
 
 # ---------------------------------------------------------
 # Devanagari Phoneme Maps
@@ -93,7 +114,7 @@ def normalize_devanagari(text: str) -> str:
     return text
 
 
-def word_to_syllables(word: str) -> List[dict]:
+def word_to_syllables(word: str, transcript_id: str = None) -> List[dict]:
     """
     Decomposes a Devanagari word into a sequence of phonetic units (syllable structures).
     """
@@ -118,6 +139,7 @@ def word_to_syllables(word: str) -> List[dict]:
                 'nasal': nasal
             })
             i += 1
+            continue  # Fix: Prevents fallthrough into consonant / else blocks
 
         # Check for consonant (including 2-char nukta combinations like 'फ' + NUKTA)
         cons_token = None
@@ -156,7 +178,6 @@ def word_to_syllables(word: str) -> List[dict]:
                 'has_nasal': has_nasal
             })
 
-
         elif char in (ANUSVARA, CHANDRABINDU):
             if units:
                 units[-1]['has_nasal'] = True
@@ -165,7 +186,12 @@ def word_to_syllables(word: str) -> List[dict]:
             units.append({'type': 'visarga', 'phoneme': 'AH'})
             i += 1
         else:
-            # Ignore punctuation, spaces, or unrecognized symbols
+            # Non-silent logging for unsupported characters
+            UNSUPPORTED_CHAR_LOG[char] = UNSUPPORTED_CHAR_LOG.get(char, 0) + 1
+            if transcript_id:
+                AFFECTED_TRANSCRIPT_IDS.add(transcript_id)
+            logger.warning(f"[Hindi G2P] Unsupported character '{char}' (U+{ord(char):04X}) in word '{word}'"
+                           + (f" [transcript: {transcript_id}]" if transcript_id else ""))
             i += 1
 
     return units
@@ -174,7 +200,7 @@ def word_to_syllables(word: str) -> List[dict]:
 def apply_schwa_deletion(units: List[dict]) -> List[str]:
     """
     Applies standard Hindi Schwa Deletion (Choudhury & Rao rule):
-    1. Word-final schwa is deleted (unless word is a monosyllabic single consonant or ends in conjunct).
+    1. Word-final schwa is deleted if vocalic_count >= 2 and not ending in conjunct.
     2. Medial schwa in V-C-schwa-C-V context is deleted.
     """
     num_units = len(units)
@@ -188,12 +214,14 @@ def apply_schwa_deletion(units: List[dict]) -> List[str]:
             vocalic_count += 1
 
     # Rule 1: Final schwa deletion
-    # In spoken Hindi, word-final schwa is deleted for words with >= 2 units
-    if num_units >= 2:
+    # In spoken Hindi, word-final schwa is deleted for words with vocalic_count >= 2
+    # and when not preceded by a halant (conjunct coda)
+    if vocalic_count >= 2 and num_units >= 2:
         last_unit = units[-1]
         if last_unit['type'] == 'consonant' and last_unit.get('has_schwa', False):
-            last_unit['has_schwa'] = False
-
+            prev_has_halant = units[-2].get('has_halant', False) if num_units >= 2 else False
+            if not prev_has_halant:
+                last_unit['has_schwa'] = False
 
     # Rule 2: Medial schwa deletion
     # For a pattern: Unit[i-1] is vocalic, Unit[i] has schwa, Unit[i+1] is followed by a vowel
@@ -201,11 +229,9 @@ def apply_schwa_deletion(units: List[dict]) -> List[str]:
         for i in range(1, num_units - 1):
             curr = units[i]
             if curr['type'] == 'consonant' and curr.get('has_schwa', False):
-                # Check if preceding unit has vowel/matra
                 prev_vocalic = (units[i - 1]['type'] == 'vowel' or 
                                 units[i - 1].get('matra') is not None or 
                                 units[i - 1].get('has_schwa', False))
-                # Check if succeeding unit has explicit vowel/matra
                 next_vocalic = (units[i + 1]['type'] == 'vowel' or 
                                 units[i + 1].get('matra') is not None)
 
@@ -233,7 +259,7 @@ def apply_schwa_deletion(units: List[dict]) -> List[str]:
     return phonemes
 
 
-def devanagari_to_phonemes(text: str, as_string: bool = False):
+def devanagari_to_phonemes(text: str, as_string: bool = False, transcript_id: str = None):
     """
     Converts Hindi Devanagari sentence to phonemes with word boundary tokens '|'.
 
@@ -244,16 +270,29 @@ def devanagari_to_phonemes(text: str, as_string: bool = False):
     all_phonemes = []
 
     for idx, word in enumerate(words):
-        # Strip punctuation
+        # Detect and log any unsupported foreign characters or symbols (excluding standard punctuation)
+        unsupported = re.findall(r'[^\u0900-\u097F\s।॥.,!?;:\"\'\-]', word)
+        for ch in unsupported:
+            UNSUPPORTED_CHAR_LOG[ch] = UNSUPPORTED_CHAR_LOG.get(ch, 0) + 1
+            if transcript_id:
+                AFFECTED_TRANSCRIPT_IDS.add(transcript_id)
+            logger.warning(f"[Hindi G2P] Unsupported character '{ch}' in word '{word}'"
+                           + (f" [transcript: {transcript_id}]" if transcript_id else ""))
+
+        # Keep Devanagari characters
         cleaned = re.sub(r'[^\u0900-\u097F]', '', word)
         if not cleaned:
             continue
-        units = word_to_syllables(cleaned)
+        units = word_to_syllables(cleaned, transcript_id=transcript_id)
         word_phonemes = apply_schwa_deletion(units)
         if word_phonemes:
             if all_phonemes:
                 all_phonemes.append('|')  # Word boundary delimiter
             all_phonemes.extend(word_phonemes)
+
+    if as_string:
+        return ' '.join(all_phonemes)
+    return all_phonemes
 
     if as_string:
         return ' '.join(all_phonemes)

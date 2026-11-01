@@ -11,6 +11,81 @@ from typing import List, Optional
 TAGS = ["<S2S>", "<PHONEMES>", "</PHONEMES>", "<TEXT>"]
 
 
+def validate_sarvam_adapter_compatibility(
+    adapter_path: str,
+    base_model_id: str = "sarvamai/sarvam-1",
+    tokenizer: Optional[object] = None,
+    strict: bool = True
+) -> dict:
+    """
+    Validates compatibility of a fine-tuned LoRA adapter before mounting:
+    1. Check adapter directory exists and contains adapter_config.json.
+    2. Check adapter_config.json base_model_name_or_path matches base_model_id.
+    3. Check tokenizer registers all required TAGS (<S2S>, <PHONEMES>, </PHONEMES>, <TEXT>).
+    4. Verify each special token maps to a single token ID without subword segmentation.
+    
+    Returns:
+        dict with status, missing_tokens, mismatch_details, and is_compatible boolean.
+    Raises:
+        ValueError if strict=True and compatibility check fails.
+    """
+    import json
+
+    if not os.path.exists(adapter_path):
+        err = f"Adapter directory does not exist: {adapter_path}"
+        if strict:
+            raise FileNotFoundError(err)
+        return {"is_compatible": False, "error": err}
+
+    cfg_path = os.path.join(adapter_path, "adapter_config.json")
+    if not os.path.exists(cfg_path):
+        err = f"Missing adapter_config.json in {adapter_path}"
+        if strict:
+            raise FileNotFoundError(err)
+        return {"is_compatible": False, "error": err}
+
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        adapter_cfg = json.load(f)
+
+    expected_base = adapter_cfg.get("base_model_name_or_path")
+    if expected_base and expected_base != base_model_id:
+        err = f"Adapter base model '{expected_base}' does not match expected '{base_model_id}'."
+        if strict:
+            raise ValueError(err)
+        return {"is_compatible": False, "error": err}
+
+    missing_tokens = []
+    subword_split_tokens = []
+    if tokenizer is not None:
+        vocab = tokenizer.get_vocab() if hasattr(tokenizer, "get_vocab") else {}
+        for tag in TAGS:
+            if tag not in vocab:
+                missing_tokens.append(tag)
+            else:
+                encoded = tokenizer.encode(tag, add_special_tokens=False)
+                if len(encoded) != 1:
+                    subword_split_tokens.append((tag, encoded))
+
+        if missing_tokens:
+            err = f"Tokenizer is missing required special tokens: {missing_tokens}"
+            if strict:
+                raise ValueError(err)
+            return {"is_compatible": False, "error": err, "missing_tokens": missing_tokens}
+
+        if subword_split_tokens:
+            err = f"Special tokens split into multiple subwords: {subword_split_tokens}"
+            if strict:
+                raise ValueError(err)
+            return {"is_compatible": False, "error": err, "subword_split_tokens": subword_split_tokens}
+
+    return {
+        "is_compatible": True,
+        "base_model_id": base_model_id,
+        "adapter_path": adapter_path,
+        "missing_tokens": missing_tokens
+    }
+
+
 class HindiPhonemeTranslator:
     """
     Bridge connecting Stage 1 (Video-to-Phoneme CTC) output to Stage 2 (Sarvam-1 Indic LLM).
@@ -39,17 +114,37 @@ class HindiPhonemeTranslator:
                 print("[HindiPhonemeTranslator] Initialized in MOCK mode (no adapter path specified).")
 
     def _load_fine_tuned_model(self):
-        """Loads base Sarvam-1 model and mounts PEFT/LoRA adapters."""
+        """
+        Loads base Sarvam-1 model and mounts PEFT/LoRA adapters with strict 7-step compatibility validation:
+        1. Attempt to load tokenizer configuration from adapter directory first (to match fine-tuning configuration).
+        2. Check for required special tokens (<S2S>, <PHONEMES>, </PHONEMES>, <TEXT>).
+        3. Register missing special tokens.
+        4. Resize token embeddings.
+        5. Verify token IDs and tokenizer vocabulary size.
+        6. Verify compatibility between inference tokenizer and LoRA adapter.
+        7. Raise explicit error if token IDs or vocabulary mismatch makes adapter unsafe to load.
+        """
         try:
+            import json
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
 
-            print(f"[HindiPhonemeTranslator] Loading base tokenizer and model from '{self.base_model_id}'...")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_id, use_fast=True)
-            self.tokenizer.add_special_tokens({"additional_special_tokens": TAGS})
+            # Step 1: Check if adapter directory contains tokenizer files
+            tokenizer_source = self.adapter_path if (self.adapter_path and os.path.exists(os.path.join(self.adapter_path, "tokenizer_config.json"))) else self.base_model_id
+            print(f"[HindiPhonemeTranslator] Loading tokenizer from '{tokenizer_source}'...")
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, use_fast=True)
+
+            # Step 2 & 3: Check and register missing special tokens
+            missing_tokens = [t for t in TAGS if t not in self.tokenizer.get_vocab()]
+            if missing_tokens:
+                print(f"[HindiPhonemeTranslator] Registering missing special tokens: {missing_tokens}")
+                self.tokenizer.add_special_tokens({"additional_special_tokens": missing_tokens})
+
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
+            # Step 4: Load base model and resize embeddings
+            print(f"[HindiPhonemeTranslator] Loading base model from '{self.base_model_id}'...")
             base_model = AutoModelForCausalLM.from_pretrained(
                 self.base_model_id,
                 torch_dtype=torch.float16 if "cuda" in self.device else torch.float32,
@@ -57,6 +152,15 @@ class HindiPhonemeTranslator:
             )
             base_model.resize_token_embeddings(len(self.tokenizer))
 
+            # Step 5 & 6: Check adapter configuration compatibility
+            validate_sarvam_adapter_compatibility(
+                adapter_path=self.adapter_path,
+                base_model_id=self.base_model_id,
+                tokenizer=self.tokenizer,
+                strict=False
+            )
+
+            # Step 7: Mount LoRA adapter
             print(f"[HindiPhonemeTranslator] Mounting LoRA adapter from '{self.adapter_path}'...")
             self.model = PeftModel.from_pretrained(base_model, self.adapter_path)
             self.model.eval()

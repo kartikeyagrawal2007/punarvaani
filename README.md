@@ -83,10 +83,10 @@ When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM
 
 | Component | Architecture / Technology | Role in Punarvaani |
 | :--- | :--- | :--- |
-| **Face & Lip Cropper** | MediaPipe Face Landmark Detection | Stabilizes, normalizes, and crops speaker mouth frames |
-| **G2P Engine** | Pure-Python Devanagari Rule-based G2P | Handles Hindi Schwa Deletion (*Schwa Vilopa*) and 55 phoneme mappings |
-| **Stage 1: Vision Model** | Spatiotemporal ViT (Conv3D Tubelet + 1D Adapter + CTC) | Translates silent lip movements into raw Hindi phoneme sequences |
-| **Stage 2: Language Model** | `sarvamai/sarvam-1` (2 Billion Parameters + LoRA) | Translates raw phoneme sequences into natural Devanagari text |
+| **Face & Lip Cropper** | MediaPipe Face Landmark Detection (`scripts/preprocess_lips.py`) | Stabilizes, normalizes, and crops speaker mouth frames ($224 \times 224$) with EMA smoothing |
+| **G2P Engine** | Pure-Python Devanagari Rule-based G2P (`Data/hindi_g2p.py`) | Handles 55-class Hindi Phonetic Inventory (HPI), Schwa Deletion, independent vowels, and audit logs |
+| **Stage 1: Vision Model** | Spatiotemporal ViT + Spatial Attention Pooling + Temporal Adapter (`Models/ML_VALLR.py`) | Extracts tubelet tokens, pools spatial patches ($196 \to 1$), performs learned temporal upsampling, and aligns phonemes via CTC ($T \ge U + R$) |
+| **Stage 2: Language Model** | `sarvamai/sarvam-1` (2B Parameters + LoRA) (`Models/Sarvam.py`) | Resolves viseme ambiguities and reconstructs grammatically fluent Devanagari text |
 
 ---
 
@@ -95,19 +95,27 @@ When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM
 ```text
 Punarvaani/
 ├── config.py                 # Configuration arguments, hyperparameters & 55-class Hindi vocab
-├── main.py                   # Unified CLI for training (Stage 1) and end-to-end inference
-├── face_cropper.py           # MediaPipe-based face and mouth region detector
+├── main.py                   # Unified CLI for training, evaluation, and end-to-end inference
+├── inference.py              # Standalone Python inference API for web/downstream integration
+├── face_cropper.py           # Real-time MediaPipe face and mouth region detector
 ├── requirements.txt          # Python dependencies
 │
 ├── Data/
-│   ├── dataset.py            # Video dataset loader, collation, and frame sampler
-│   └── hindi_g2p.py          # Hindi Grapheme-to-Phoneme converter with Schwa Deletion
+│   ├── dataset.py            # Video dataset loader, collation with CTC T >= U + R, and speaker split check
+│   └── hindi_g2p.py          # Hindi G2P converter with Schwa Deletion & diagnostic audit logging
 │
 ├── Models/
-│   ├── ML_VALLR.py           # Spatiotemporal ViT with tubelet embeddings & CTC head
-│   ├── Sarvam.py             # Sarvam-1 connector (with MOCK fallback & LoRA mounting)
+│   ├── ML_VALLR.py           # Spatiotemporal ViT, SpatialAttentionPool, and TemporalAdapter
+│   ├── Sarvam.py             # Sarvam-1 connector with 7-step adapter validation & MOCK fallback
 │   ├── VALLR.py              # Classic VALLR (VideoMAE + Wav2Vec2 CTC) implementation
 │   └── Llama.py              # Reference LLM fine-tuning scripts
+│
+├── scripts/
+│   └── preprocess_lips.py    # Offline batch MediaPipe lip cropping script with EMA landmark smoothing
+│
+├── tests/
+│   ├── __init__.py
+│   └── test_punarvaani.py    # Automated test suite (18 unit tests covering phonetics, ViT, CTC, & LLM)
 │
 ├── hindi_dataset/            # Directory for paired video files and Devanagari text transcripts
 │   ├── README.md             # Dataset instructions
@@ -134,11 +142,21 @@ cd Punarvaani
 pip install -r requirements.txt
 ```
 
-### 2. Preparing the Hindi Dataset
+### 2. Preparing the Hindi Dataset & Offline Lip Cropping
 
-Store paired video files and text transcripts in `hindi_dataset/`:
+Store paired raw video files and text transcripts in a folder (e.g. `raw_videos/`):
 * `sample001.mp4` (video clip of speaker's face)
 * `sample001.txt` (UTF-8 encoded Devanagari text: e.g. `नमस्ते भारत`)
+
+Optionally run the offline batch preprocessor to crop and stabilize lips ahead of training:
+
+```bash
+python scripts/preprocess_lips.py \
+  --input_dir ./raw_videos \
+  --output_dir ./hindi_dataset \
+  --num_frames 16 \
+  --frame_size 224
+```
 
 ### 3. Training Stage 1 (Video-to-Phoneme CTC Model)
 
@@ -152,12 +170,25 @@ python main.py \
   --save_model_path ./checkpoints/punarvaani_stage1.pth \
   --epochs 25 \
   --batch_size 16 \
-  --num_frames 16
+  --num_frames 16 \
+  --temporal_upsample_factor 4
 ```
 
-### 4. Running End-to-End Inference
+### 4. Evaluating Model Performance
 
-Once you have trained the Stage 1 model and placed your fine-tuned Sarvam-1 LoRA weights in `checkpoints/sarvam_lora/`, run end-to-end inference on any silent video:
+Evaluate validation CTC loss and Phoneme Error Rate (PER) on held-out test data:
+
+```bash
+python main.py \
+  --mode eval \
+  --data_dir ./hindi_dataset \
+  --save_model_path ./checkpoints/punarvaani_stage1.pth \
+  --eval_batch_size 8
+```
+
+### 5. Running End-to-End Inference via CLI
+
+Once Stage 1 is trained and fine-tuned Sarvam-1 LoRA weights are in `checkpoints/sarvam_lora/`, run end-to-end inference on any silent video:
 
 ```bash
 python main.py \
@@ -167,7 +198,35 @@ python main.py \
   --sarvam_adapter_path ./checkpoints/sarvam_lora
 ```
 
-*(Note: If Sarvam-1 LoRA weights are still training, omitting `--sarvam_adapter_path` runs Stage 2 in safe MOCK mode so you can test Stage 1 independently).*
+*(Note: If Sarvam-1 LoRA weights are still training, omitting `--sarvam_adapter_path` runs Stage 2 in transparent MOCK mode so you can verify Stage 1 predictions).*
+
+### 6. Standalone Python Inference API
+
+For web interfaces (FastAPI / Streamlit / Flask), import and run `transcribe_video`:
+
+```python
+from inference import transcribe_video
+
+result = transcribe_video(
+    video_path="path/to/silent_video.mp4",
+    stage1_weights_path="checkpoints/punarvaani_stage1.pth",
+    sarvam_adapter_path="checkpoints/sarvam_lora"
+)
+
+if result["success"]:
+    print("Predicted Phonemes:", result["phonemes"])
+    print("Hindi Transcription:", result["transcription"])
+else:
+    print("Transcription failed:", result["error"])
+```
+
+### 7. Running the Automated Test Suite
+
+Verify all 18 unit tests across phonetics, ViT space-time interpolation, temporal adapter upsampling lengths, CTC $T \ge U + R$ conditions, and Sarvam token compatibility:
+
+```bash
+python -m unittest tests/test_punarvaani.py -v
+```
 
 ---
 

@@ -47,7 +47,14 @@ def load_args():
     parser.add_argument('--num_frames', type=int, default=16, help="Number of frames sampled per video clip")
     parser.add_argument('--infer_video_path', type=str, default=None, help="Path to video file for inference")
     parser.add_argument('--language', type=str, choices=['hindi', 'english'], default='hindi', help="Target language vocabulary ('hindi' or 'english')")
-    parser.add_argument('--crop_face', action='store_true', default=True, help="Use MediaPipe FaceCropper to crop face/mouth region")
+    parser.add_argument('--crop_face', dest='crop_face', action='store_true', help="Use MediaPipe FaceCropper to crop face/mouth region")
+    parser.add_argument('--no_crop_face', dest='crop_face', action='store_false', help="Disable face/mouth cropping")
+    parser.set_defaults(crop_face=True)
+
+    # Architectural parameters
+    parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter (default: 4 for 16 frames)")
+    parser.add_argument('--max_invalid_sample_pct', type=float, default=10.0, help="Maximum allowed percentage of invalid CTC samples per epoch")
+    parser.add_argument('--eval_batch_size', type=int, default=16, help="Batch size for validation and evaluation mode")
 
     # Stage 2 LLM (Sarvam-1) configuration
     parser.add_argument('--sarvam_adapter_path', type=str, default=None, help="Path to directory containing fine-tuned Sarvam-1 LoRA adapter weights")

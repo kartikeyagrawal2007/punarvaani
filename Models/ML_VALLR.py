@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.init as init
 from typing import Tuple, Optional
 
@@ -75,8 +76,16 @@ class VideoViTMasked(nn.Module):
             bias=True
         )
 
-        # Positional embeddings: created on first forward for the current N
-        self.register_buffer("pos_embed", None, persistent=False)  # created as nn.Parameter at runtime
+        # Base grid dimensions (for standard 16 frames at 224x224, tubelet 2, patch 16)
+        self.base_num_frames = 16
+        self.base_Tp = self.base_num_frames // tubelet_size  # 8
+        self.base_Hp = img_size // patch_size                 # 14
+        self.base_Wp = img_size // patch_size                 # 14
+        base_num_patches = self.base_Tp * self.base_Hp * self.base_Wp  # 1568
+
+        # Positional embeddings: pre-initialized as nn.Parameter for optimizer registration
+        self.pos_embed = nn.Parameter(torch.zeros(1, base_num_patches, embed_dim))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         # Transformer encoder
         self.blocks = nn.ModuleList([
@@ -95,6 +104,26 @@ class VideoViTMasked(nn.Module):
             elif isinstance(m, nn.LayerNorm):
                 init.ones_(m.weight)
                 init.zeros_(m.bias)
+
+    def get_interpolated_pos_embed(self, Tp: int, Hp: int, Wp: int) -> torch.Tensor:
+        """
+        Space-time aware positional embedding interpolation:
+        Preserves the (Hp, Wp) spatial grid while interpolating along the temporal axis Tp.
+        Shape transformation: (1, N_base, D) -> (1, D, Tp_base, Hp_base, Wp_base) -> interpolate -> (1, N_new, D)
+        """
+        if Tp == self.base_Tp and Hp == self.base_Hp and Wp == self.base_Wp:
+            return self.pos_embed
+
+        D = self.embed_dim
+        pos = self.pos_embed.reshape(1, self.base_Tp, self.base_Hp, self.base_Wp, D)
+        pos = pos.permute(0, 4, 1, 2, 3)  # (1, D, Tp_base, Hp_base, Wp_base)
+
+        # Interpolate along the temporal grid (and spatial if resolution changed)
+        pos_interp = F.interpolate(pos, size=(Tp, Hp, Wp), mode='trilinear', align_corners=False)
+
+        # Permute and flatten back: (1, Tp * Hp * Wp, D)
+        pos_interp = pos_interp.permute(0, 2, 3, 4, 1).flatten(1, 3)
+        return pos_interp
 
     @torch.no_grad()
     def _rand_mask_idx(self, B: int, N: int, device: torch.device):
@@ -119,33 +148,92 @@ class VideoViTMasked(nn.Module):
         x = x.flatten(2).transpose(1, 2)  # (B, N, D), N = Tp*Hp*Wp
         N = x.size(1)
 
-        # Create/resize learnable positional embeddings for this N
-        if (self.pos_embed is None) or (self.pos_embed.size(1) != N):
-            self.pos_embed = nn.Parameter(torch.zeros(1, N, self.embed_dim, device=device))
+        # Retrieve space-time interpolated positional embeddings
+        pos_embed = self.get_interpolated_pos_embed(Tp, Hp, Wp).to(device=device, dtype=x.dtype)
+        tokens = x + pos_embed  # (B, N, D)
 
-        tokens = x + self.pos_embed  # (B, N, D)
-
-        # Masking (optional). If masked, restore to original length with zeros.
-        if self.mask_ratio > 0.0:
+        # Masking: ONLY applied during training if mask_ratio > 0.0
+        apply_mask = self.training and (self.mask_ratio > 0.0)
+        if apply_mask:
             kept_idx, mask = self._rand_mask_idx(B, N, device)
             batch_idx = torch.arange(B, device=device).unsqueeze(-1)
             tokens_vis = tokens[batch_idx, kept_idx]  # (B, K, D)
         else:
             tokens_vis = tokens
-            kept_idx = None  # unused
+            kept_idx = None
 
         # Encode
         for blk in self.blocks:
             tokens_vis = blk(tokens_vis)
         tokens_vis = self.norm(tokens_vis)  # (B, K or N, D)
 
-        if self.mask_ratio > 0.0:
-            # Restore masked positions with zeros (keeps length == N)
+        if apply_mask:
+            # Restore masked positions with zeros
             out = torch.zeros(B, N, self.embed_dim, device=device, dtype=tokens_vis.dtype)
             out[torch.arange(B, device=device).unsqueeze(-1), kept_idx] = tokens_vis
             return out  # (B, N, D)
         else:
             return tokens_vis  # (B, N, D)
+
+
+# ==========================================
+# Spatial Aggregation & Temporal Adapter
+# ==========================================
+
+class SpatialAttentionPool(nn.Module):
+    """
+    Collapses Sp spatial tokens into 1 feature vector per temporal tubelet:
+    (B, Tp, Sp, D) -> (B, Tp, D)
+    """
+    def __init__(self, embed_dim: int):
+        super().__init__()
+        self.query = nn.Parameter(torch.randn(1, 1, 1, embed_dim) * 0.02)
+        self.scale = embed_dim ** -0.5
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, Tp, Sp, D)
+        scores = torch.matmul(x, self.query.transpose(-1, -2)) * self.scale
+        attn = torch.softmax(scores, dim=2)
+        out = (x * attn).sum(dim=2)  # (B, Tp, D)
+        return out
+
+
+class TemporalAdapter(nn.Module):
+    """
+    Configurable temporal adapter module:
+    Reduces channel dimension and performs learned temporal upsampling along the time axis:
+    (B, in_channels, Tp) -> (B, adapter_dim, T_ctc) where T_ctc = Tp * upsample_factor
+    """
+    def __init__(self, in_channels: int = 768, adapter_dim: int = 256, upsample_factor: int = 4):
+        super().__init__()
+        self.upsample_factor = upsample_factor
+        self.conv_in = nn.Sequential(
+            nn.Conv1d(in_channels, adapter_dim, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(adapter_dim),
+            nn.ReLU(inplace=True)
+        )
+        if upsample_factor > 1:
+            self.upsample = nn.ConvTranspose1d(
+                adapter_dim, adapter_dim,
+                kernel_size=upsample_factor,
+                stride=upsample_factor,
+                padding=0
+            )
+        else:
+            self.upsample = nn.Identity()
+
+        self.refine = nn.Sequential(
+            nn.Conv1d(adapter_dim, adapter_dim, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm1d(adapter_dim),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, in_channels, Tp)
+        h = self.conv_in(x)
+        h = self.upsample(h)
+        h = self.refine(h)
+        return h  # (B, adapter_dim, Tp * upsample_factor)
 
 
 # ============================
@@ -154,32 +242,38 @@ class VideoViTMasked(nn.Module):
 
 class VALLR(nn.Module):
     """
-    VALLR with spatiotemporal ViT (tubelet embedding) + temporal Conv1d downsampling + adapter + CTC head.
+    VALLR with spatiotemporal ViT (tubelet embedding) + spatial attention pooling
+    + configurable temporal adapter (learned upsampling) + adapter + CTC head.
 
     Returns (logits, adapted_features):
-        logits:           (B, N_down, num_classes)
-        adapted_features: (B, N_down, ctc_hidden_size)
+        logits:           (B, T_ctc, num_classes)
+        adapted_features: (B, T_ctc, ctc_hidden_size)
     """
     def __init__(
         self,
-        adapter_dim: int,
+        adapter_dim: int = 256,
         feature_size: int = 768,      # ViT embed dim
-        ctc_hidden_size: int = 768,
-        num_classes: int = 32,
+        ctc_hidden_size: int = 256,
+        num_classes: int = 55,
+        temporal_upsample_factor: int = 4,
 
         # ViT (video) config
         img_size: int = 224,
         patch_size: int = 16,
-        tubelet_size: int = 2,        # <<< with T=16 gives T' = 8
+        tubelet_size: int = 2,        # with T=16 gives T' = 8
         in_channels: int = 3,
         vit_depth: int = 8,
         vit_heads: int = 12,
         vit_mlp_ratio: float = 4.0,
         vit_dropout: float = 0.2,
         vit_attn_dropout: float = 0.0,
-        vit_mask_ratio: float = 0.9,  # 0.0 keeps N fixed (e.g., 1568)
+        vit_mask_ratio: float = 0.0,  # 0.0 default for supervised mode
     ):
         super().__init__()
+        self.temporal_upsample_factor = temporal_upsample_factor
+        self.patch_size = patch_size
+        self.tubelet_size = tubelet_size
+        self.img_size = img_size
 
         # 1) Spatiotemporal ViT backbone producing tokens (B, N, D)
         self.backbone = VideoViTMasked(
@@ -196,34 +290,23 @@ class VALLR(nn.Module):
             mask_ratio=vit_mask_ratio,
         )
 
-        # 2) Temporal downsampling over token axis N (treat tokens as a "time" sequence)
-        #    Safer strides (avoid collapsing very short sequences; fine for N=1568).
-        self.downsampling = nn.Sequential(
-            nn.Conv1d(in_channels=feature_size, out_channels=adapter_dim, kernel_size=5, stride=2, padding=2),
-            nn.BatchNorm1d(adapter_dim, eps=1e-5, momentum=0.1, affine=True),
-            nn.ReLU(),
+        # 2) Spatial Attention Pooling: (B, Tp, Sp, D) -> (B, Tp, D)
+        self.spatial_pool = SpatialAttentionPool(embed_dim=feature_size)
 
-            nn.Conv1d(in_channels=adapter_dim, out_channels=adapter_dim, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(adapter_dim, eps=1e-5, momentum=0.1, affine=True),
-            nn.ReLU(),
-
-            nn.Conv1d(in_channels=adapter_dim, out_channels=adapter_dim, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm1d(adapter_dim, eps=1e-5, momentum=0.1, affine=True),
-            nn.ReLU(),
-            
-            nn.Conv1d(in_channels=adapter_dim, out_channels=adapter_dim, kernel_size=3, stride=3, padding=1),
-            nn.BatchNorm1d(adapter_dim, eps=1e-5, momentum=0.1, affine=True),
-            nn.ReLU(),
-            nn.AvgPool1d(kernel_size=5, stride=6)  # Adjust kernel size and stride to control final length
+        # 3) Temporal Adapter with configurable learned temporal upsampling: (B, D, Tp) -> (B, adapter_dim, T_ctc)
+        self.temporal_adapter = TemporalAdapter(
+            in_channels=feature_size,
+            adapter_dim=adapter_dim,
+            upsample_factor=temporal_upsample_factor
         )
 
-        # 3) Adapter to the CTC hidden size
+        # 4) Adapter to CTC hidden size
         self.adapter = nn.Sequential(
             nn.Linear(adapter_dim, ctc_hidden_size),
             nn.ReLU(inplace=True),
         )
 
-        # 4) CTC head
+        # 5) CTC head
         self.ctc_head = nn.Linear(ctc_hidden_size, num_classes)
 
         # Init
@@ -231,7 +314,7 @@ class VALLR(nn.Module):
 
     @staticmethod
     def _init_weights(module):
-        if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        if isinstance(module, (nn.Conv1d, nn.Conv2d, nn.Conv3d, nn.ConvTranspose1d)):
             init.kaiming_normal_(module.weight, nonlinearity='relu')
             if getattr(module, "bias", None) is not None:
                 init.zeros_(module.bias)
@@ -250,31 +333,43 @@ class VALLR(nn.Module):
         """
         Accepts either (B, C, T, H, W) or (B, T, C, H, W).
         Returns:
-            logits  : (B, N_down, num_classes)
-            adapted : (B, N_down, ctc_hidden_size)
+            logits  : (B, T_ctc, num_classes)
+            adapted : (B, T_ctc, ctc_hidden_size)
         """
         # Normalize layout to (B, C, T, H, W)
         if video_inputs.ndim != 5:
             raise ValueError(f"Expected 5D input, got shape {video_inputs.shape}")
 
-        if video_inputs.shape[1] in (1, 3):        # (B, C, T, H, W)
+        if video_inputs.shape[1] in (1, 3):
             vid = video_inputs
-        else:                                       # (B, T, C, H, W)
+        else:
             vid = video_inputs.permute(0, 2, 1, 3, 4).contiguous()
 
-        # 1) ViT backbone: tokens (B, N, D)
-        tokens = self.backbone(vid)                 # e.g., (B, 1568, 768)
+        B, C, T, H, W = vid.shape
+        Tp = T // self.tubelet_size
+        Hp = H // self.patch_size
+        Wp = W // self.patch_size
+        Sp = Hp * Wp
 
-        # 2) Temporal downsampling over token axis
-        x = tokens.permute(0, 2, 1)                 # (B, D, N)
-        x = self.downsampling(x)                    # (B, adapter_dim, N_down)
-        x = x.permute(0, 2, 1)                      # (B, N_down, adapter_dim)
+        # 1) ViT backbone: tokens (B, N, D) where N = Tp * Sp
+        tokens = self.backbone(vid)
 
-        # 3) Adapter
-        adapted = self.adapter(x)                   # (B, N_down, ctc_hidden_size)
+        # 2) Unflatten to space-time grid: (B, Tp, Sp, D)
+        grid_tokens = tokens.view(B, Tp, Sp, -1)
 
-        # 4) CTC logits
-        logits = self.ctc_head(adapted)             # (B, N_down, num_classes)
+        # 3) Spatial Attention Pooling: (B, Tp, D)
+        t_feats = self.spatial_pool(grid_tokens)
+
+        # 4) Temporal Adapter (Learned Upsampling): (B, adapter_dim, T_ctc)
+        t_feats = t_feats.transpose(1, 2)              # (B, D, Tp)
+        adapted_temp = self.temporal_adapter(t_feats)  # (B, adapter_dim, T_ctc)
+        adapted_temp = adapted_temp.transpose(1, 2)    # (B, T_ctc, adapter_dim)
+
+        # 5) Adapter
+        adapted = self.adapter(adapted_temp)           # (B, T_ctc, ctc_hidden_size)
+
+        # 6) CTC logits
+        logits = self.ctc_head(adapted)                # (B, T_ctc, num_classes)
 
         return logits, adapted
 
@@ -309,4 +404,4 @@ class VALLR(nn.Module):
 
 
 # Alias for backward compatibility
-ML_VALLR = VALLR
+ML_VALLR = VALLR
