@@ -39,12 +39,12 @@ When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM
 │   SILENT VIDEO  │      │  PREPROCESSING & CROP   │      │ STAGE 1: VISION-TO-CTC  │      │ STAGE 2: SARVAM-1 LLM   │
 │                 │ ───► │                         │ ───► │                         │ ───► │                         │
 │ Speaker talking │      │ MediaPipe Face Mesh     │      │ Spatiotemporal ViT      │      │ Indic Language Model    │
-│ without audio   │      │ Isolates 16 mouth crops │      │ Outputs Hindi Phonemes  │      │ Reconstructs Sentences  │
+│ without audio   │      │ Tracks mouth ROI        │      │ Outputs Hindi Phonemes  │      │ Reconstructs Sentences  │
 └─────────────────┘      └─────────────────────────┘      └─────────────────────────┘      └─────────────────────────┘
                                                                        │                                │
                                                                        ▼                                ▼
                                                             Predicted Phonemes:                 Final Transcription:
-                                                            "N M S TD E | BH AA R TD"            "नमस्ते भारत"
+                                                            "N A M A S TD E | BH AA R A TD"      "नमस्ते भारत"
 ```
 
 ### The Step-by-Step Inference Journey
@@ -53,11 +53,11 @@ When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM
    The user supplies a video of a person speaking Hindi without any audio track (e.g., silent CCTV, high-noise factory/cockpit footage, silent speech from aphonic individuals, or a muted video call).
 
 2. **Step 1: Intelligent Mouth Tracking & ROI Isolation (`face_cropper.py`)**  
-   MediaPipe Face Mesh detects facial landmarks across the video clip. It tracks the lips regardless of minor head rotations, crops the mouth region of interest (ROI) to $224 \times 224$ pixels, and samples a normalized sequence of 16 frames.
+   MediaPipe Face Mesh detects facial landmarks across the video clip. It tracks the lips regardless of minor head rotations, crops the mouth region of interest (ROI) to $224 \times 224$ pixels, and reads **all frames** of the clip (optionally strided and capped by `--max_frames`) so long sentences are not truncated.
 
 3. **Step 2: Spatiotemporal Visual Recognition (`ML_VALLR`)**  
    The cropped mouth frames are passed through the 3D tubelet-convolutional Vision Transformer (ViT). The model evaluates subtle kinematic muscle movements (opening, rounded lips, tongue presses, dental contact) and emits frame-wise logits over the 55 Hindi phonetic classes. Greedy/beam CTC decoding resolves these into a clean phoneme string:
-   $$\text{Video Frames} \xrightarrow{\text{ViT + CTC}} \texttt{N M S TD E | BH AA R TD}$$
+   $$\text{Video Frames} \xrightarrow{\text{ViT + CTC}} \texttt{N A M A S TD E | BH AA R A TD}$$
 
 4. **Step 3: Linguistic Resolution via Fine-Tuned LLM (`Models/Sarvam.py`)**  
    In visual speech, many sounds look identical on the lips—for example, **/P/**, **/B/**, and **/M/** are all bilabial closures and visual twins (visemes). Visuals alone cannot distinguish "बात" (*baat*) from "पात" (*paat*).  
@@ -67,7 +67,7 @@ When the dataset is collected, the Stage 1 model is trained, and the Stage 2 LLM
      ```text
      <S2S>
      <PHONEMES>
-     N M S TD E | BH AA R TD
+     N A M A S TD E | BH AA R A TD
      </PHONEMES>
      <TEXT>
      ```
@@ -107,15 +107,26 @@ Punarvaani/
 ├── Models/
 │   ├── ML_VALLR.py           # Spatiotemporal ViT, SpatialAttentionPool, and TemporalAdapter
 │   ├── Sarvam.py             # Sarvam-1 connector with 7-step adapter validation & MOCK fallback
-│   ├── VALLR.py              # Classic VALLR (VideoMAE + Wav2Vec2 CTC) implementation
-│   └── Llama.py              # Reference LLM fine-tuning scripts
+│   └── VALLR.py              # Classic VALLR (VideoMAE + Wav2Vec2 CTC) reference implementation
+│
+├── mouth_geometry.py         # Dependency-free mouth ROI box maths (tested without MediaPipe)
 │
 ├── scripts/
-│   └── preprocess_lips.py    # Offline batch MediaPipe lip cropping script with EMA landmark smoothing
+│   ├── preprocess_lips.py    # Offline batch MediaPipe mouth cropping (preserves speaker folders)
+│   ├── preflight.py          # Validate a dataset handover + Sarvam adapter before training
+│   └── make_synthetic_dataset.py  # Tiny synthetic speaker-tree dataset for smoke tests
 │
 ├── tests/
 │   ├── __init__.py
-│   └── test_punarvaani.py    # Automated test suite (18 unit tests covering phonetics, ViT, CTC, & LLM)
+│   ├── test_punarvaani.py    # Core phonetics, ViT, CTC, collate, Sarvam contract
+│   ├── test_dataset.py       # Speaker-disjoint splits + all-frames sampling
+│   ├── test_collate.py       # Variable-length padding and CTC lengths
+│   ├── test_model_lengths.py # Masking, padding invariance, input lengths
+│   ├── test_mouth_geometry.py
+│   ├── test_preprocess.py
+│   ├── test_preflight.py
+│   ├── test_sarvam.py / test_scheduler.py / test_mixed_precision.py / test_g2p.py
+│   └── test_smoke_e2e.py     # RUN_SLOW=1 train -> eval -> infer
 │
 ├── hindi_dataset/            # Directory for paired video files and Devanagari text transcripts
 │   ├── README.md             # Dataset instructions
@@ -144,9 +155,15 @@ pip install -r requirements.txt
 
 ### 2. Preparing the Hindi Dataset & Offline Lip Cropping
 
-Store paired raw video files and text transcripts in a folder (e.g. `raw_videos/`):
-* `sample001.mp4` (video clip of speaker's face)
-* `sample001.txt` (UTF-8 encoded Devanagari text: e.g. `नमस्ते भारत`)
+Store paired raw video files and text transcripts in **speaker subfolders** (the split is speaker-disjoint):
+
+```text
+raw_videos/
+├── spk01/
+│   ├── spk01_001.mp4
+│   └── spk01_001.txt      # UTF-8 Devanagari, e.g. "नमस्ते भारत"
+└── spk02/...
+```
 
 Optionally run the offline batch preprocessor to crop and stabilize lips ahead of training:
 
@@ -154,7 +171,7 @@ Optionally run the offline batch preprocessor to crop and stabilize lips ahead o
 python scripts/preprocess_lips.py \
   --input_dir ./raw_videos \
   --output_dir ./hindi_dataset \
-  --num_frames 16 \
+  --max_frames 96 \
   --frame_size 224
 ```
 
@@ -169,8 +186,8 @@ python main.py \
   --data_dir ./hindi_dataset \
   --save_model_path ./checkpoints/punarvaani_stage1.pth \
   --epochs 25 \
-  --batch_size 16 \
-  --num_frames 16 \
+  --batch_size 8 \
+  --max_frames 96 \
   --temporal_upsample_factor 4
 ```
 
@@ -209,7 +226,7 @@ from inference import transcribe_video
 
 result = transcribe_video(
     video_path="path/to/silent_video.mp4",
-    stage1_weights_path="checkpoints/punarvaani_stage1.pth",
+    stage1_model_path="checkpoints/punarvaani_stage1.pth",
     sarvam_adapter_path="checkpoints/sarvam_lora"
 )
 
@@ -222,10 +239,18 @@ else:
 
 ### 7. Running the Automated Test Suite
 
-Verify all 18 unit tests across phonetics, ViT space-time interpolation, temporal adapter upsampling lengths, CTC $T \ge U + R$ conditions, and Sarvam token compatibility:
+Run the unit suite covering phonetics, ViT space-time interpolation, variable-length padding, CTC $T \ge U + R$ conditions, speaker-disjoint splits, the preflight validator, and Sarvam token compatibility:
 
 ```bash
-python -m unittest tests/test_punarvaani.py -v
+python -m unittest discover -s tests -v
+```
+
+Before training on a new handover, validate the data and adapter:
+
+```bash
+python scripts/preflight.py \
+  --data_dir ./hindi_dataset \
+  --sarvam_adapter_path ./checkpoints/sarvam_lora
 ```
 
 ---

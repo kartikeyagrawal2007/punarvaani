@@ -2,6 +2,12 @@ import mediapipe as mp
 import numpy as np
 import cv2
 
+from mouth_geometry import (
+    MOUTH_LANDMARK_INDICES,
+    center_square_box,
+    compute_mouth_box,
+)
+
 
 # Indices for the relevant landmarks
 _LEFT_EYE_LANDMARK_INDICES = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398]
@@ -544,6 +550,112 @@ class FaceCropper:
                                                                  static_image_mode=landmark_detector_static_image_mode,
                                                                  min_detection_confidence=min_landmark_detector_confidence)
 
+        # Temporal smoothing state for crop_mouth(); reset per video.
+        self.mouth_ema_alpha = 0.6
+        self._mouth_box = None
+        self._last_mouth_crop = None
+
+    def reset(self):
+        """Clear per-video mouth-crop smoothing state."""
+        self._mouth_box = None
+        self._last_mouth_crop = None
+
+    @staticmethod
+    def _resize_mouth(crop, frame_size):
+        if frame_size is None:
+            return crop
+        if isinstance(frame_size, (tuple, list)):
+            size = (int(frame_size[0]), int(frame_size[1]))
+        else:
+            size = (int(frame_size), int(frame_size))
+        return cv2.resize(crop, size)
+
+    def _fallback_mouth_crop(self, image, frame_size):
+        if image is None or image.size == 0:
+            return None
+        if self._last_mouth_crop is not None:
+            crop = self._last_mouth_crop
+        else:
+            height, width = image.shape[:2]
+            top, bottom, left, right = center_square_box(width, height, 1.0)
+            crop = image[top:bottom + 1, left:right + 1]
+        return self._resize_mouth(crop, frame_size)
+
+    def crop_mouth(self, image, frame_size=None, correct_roll=True):
+        """
+        Crop the mouth region of the most prominent face.
+
+        Args:
+            image: RGB numpy image.
+            frame_size: optional output size (tuple or int). None keeps the raw crop.
+            correct_roll: rotate the face upright before measuring the lips.
+
+        Returns:
+            RGB mouth crop, or a centred-crop/previous-crop fallback when no face
+            is detected. Never raises on an undetectable frame.
+        """
+        if image is None or image.size == 0:
+            return self._fallback_mouth_crop(image, frame_size)
+
+        result = self.face_detector.process(image)
+        detections = result.detections or []
+        valid = [
+            face for face in detections
+            if 0 <= face.location_data.relative_bounding_box.xmin <= 1
+            and 0 <= face.location_data.relative_bounding_box.ymin <= 1
+        ]
+        if not valid:
+            return self._fallback_mouth_crop(image, frame_size)
+
+        def bbox_area(face):
+            box = face.location_data.relative_bounding_box
+            return box.width * box.height
+
+        face = max(valid, key=bbox_area)
+        inflation_factor = _get_bounding_box_inflation_factor(
+            face.location_data.relative_keypoints[:2]
+        )
+        face_image = _get_inflated_face_image(
+            image, face.location_data.relative_bounding_box, inflation_factor
+        )
+        if face_image.size == 0:
+            return self._fallback_mouth_crop(image, frame_size)
+
+        detected_landmarks = self.landmark_detector.process(face_image).multi_face_landmarks
+        if not detected_landmarks:
+            return self._fallback_mouth_crop(image, frame_size)
+
+        landmarks = detected_landmarks[0].landmark
+        if correct_roll:
+            face_image, pixel_landmarks = _get_roll_corrected_image_and_landmarks(
+                face_image, landmarks
+            )
+        else:
+            pixel_landmarks = np.ndarray.astype(np.rint(np.array([
+                np.multiply([lm.x for lm in landmarks], face_image.shape[1]),
+                np.multiply([lm.y for lm in landmarks], face_image.shape[0]),
+            ])), np.int64)
+
+        points = [
+            (pixel_landmarks[0, idx], pixel_landmarks[1, idx])
+            for idx in MOUTH_LANDMARK_INDICES
+        ]
+        top, bottom, left, right = compute_mouth_box(
+            points,
+            image_width=face_image.shape[1],
+            image_height=face_image.shape[0],
+            prev_box=self._mouth_box,
+            alpha=self.mouth_ema_alpha,
+        )
+        self._mouth_box = (top, bottom, left, right)
+
+        crop = face_image[top:bottom + 1, left:right + 1]
+        if crop.size == 0:
+            return self._fallback_mouth_crop(image, frame_size)
+
+        crop = self._resize_mouth(crop, frame_size)
+        self._last_mouth_crop = crop
+        return crop
 
     def get_faces(self, image, remove_background=False, correct_roll=True):
         """

@@ -162,10 +162,11 @@ class TestPunarvaaniCTCConditionAndCollate(unittest.TestCase):
         dummy_sample = (torch.zeros(16, 3, 224, 224), long_label, "लंबा वाक्य")
         batch = [dummy_sample, dummy_sample]
 
-        videos, labels, texts = custom_collate(batch, vocab, t_ctc=32)
-        self.assertIsNone(videos)
-        self.assertEqual(labels, [])
-        self.assertEqual(texts, [])
+        result = custom_collate(batch, vocab, t_ctc=32)
+        self.assertIsNone(result.videos)
+        self.assertEqual(result.labels, [])
+        self.assertEqual(result.texts, [])
+        self.assertEqual(result.dropped, 2)
 
 
 class TestPunarvaaniCLIAndInference(unittest.TestCase):

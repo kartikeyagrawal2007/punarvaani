@@ -1,3 +1,6 @@
+# Punarvaani runtime dependencies.
+# Python 3.10/3.11 are recommended: mediapipe and decord wheels lag behind 3.13.
+# `triton` is Linux/CUDA-only; remove it on Windows or CPU-only installs.
 absl-py==2.1.0
 attrs==24.2.0
 audioread==3.0.1

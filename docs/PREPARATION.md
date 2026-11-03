@@ -1,5 +1,7 @@
 # Preparation: team discussion and call with Sunag sir
 
+> **⚠️ Historical document.** Prepared for the earlier `punarvaani/` AV-HuBERT / Path-A/B design. The grant and call guidance remains useful, but the technical claims (82 tests, `punarvaani` package, AV-HuBERT encoder) do **not** describe the current VALLR codebase. See [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md).
+
 **Purpose of the call:** get Sunag sir's support to apply to the **ICMR "First in the World" Challenge Grant (2026)** with Punarvaani, agree on PI/Co-PI, and agree on the next steps to the deadline.
 
 **Call:** tomorrow, 12:30 PM (he travels in the evening, so keep it to ~20 minutes).

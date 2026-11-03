@@ -1,5 +1,7 @@
 # Punarvaani roadmap
 
+> **⚠️ Historical document.** This roadmap describes the earlier `punarvaani/` AV-HuBERT / Path-A/B plan, not the current VALLR implementation. See [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md) for the active plan.
+
 The code for every stage is in `main` and tested on CPU with synthetic data. What remains is the real-world part: Hindi data, volunteer recordings, pretrained weights and GPU training. This roadmap turns the 16-week plan into checklists with owners and exit criteria.
 
 **Owners** (from the team split in the README): **D** = Data lead, **V** = Vision model lead, **S** = Speech model lead, **Sys** = System lead.

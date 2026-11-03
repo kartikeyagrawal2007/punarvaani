@@ -1,5 +1,7 @@
 # Punarvaani: the complete learning guide
 
+> **⚠️ Historical document.** This describes an earlier `punarvaani/` AV-HuBERT / Path-A/B design that is **not** in this repository. The current implementation is the VALLR core described in [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md). File names, test counts and commands below are historical.
+
 *Everything that was built, how it works, why each decision was made, the background you need, and how to talk about it in an interview.*
 
 ---

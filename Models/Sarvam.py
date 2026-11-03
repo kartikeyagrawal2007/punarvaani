@@ -104,13 +104,16 @@ class HindiPhonemeTranslator:
         self.model = None
         self.tokenizer = None
         self.is_mock = True
+        self.mock_reason = None
 
         if adapter_path and os.path.exists(adapter_path):
             self._load_fine_tuned_model()
         else:
             if adapter_path:
+                self.mock_reason = f"adapter path not found: {adapter_path}"
                 print(f"[HindiPhonemeTranslator] Adapter path '{adapter_path}' not found. Falling back to MOCK mode.")
             else:
+                self.mock_reason = "no adapter path specified"
                 print("[HindiPhonemeTranslator] Initialized in MOCK mode (no adapter path specified).")
 
     def _load_fine_tuned_model(self):
@@ -125,9 +128,15 @@ class HindiPhonemeTranslator:
         7. Raise explicit error if token IDs or vocabulary mismatch makes adapter unsafe to load.
         """
         try:
-            import json
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import PeftModel
+        except ImportError as exc:
+            self.is_mock = True
+            self.mock_reason = f"missing dependency: {exc}"
+            print(f"[HindiPhonemeTranslator] Warning: {self.mock_reason}. Reverting to MOCK mode.")
+            return
+
+        try:
 
             # Step 1: Check if adapter directory contains tokenizer files
             tokenizer_source = self.adapter_path if (self.adapter_path and os.path.exists(os.path.join(self.adapter_path, "tokenizer_config.json"))) else self.base_model_id
@@ -152,24 +161,30 @@ class HindiPhonemeTranslator:
             )
             base_model.resize_token_embeddings(len(self.tokenizer))
 
-            # Step 5 & 6: Check adapter configuration compatibility
-            validate_sarvam_adapter_compatibility(
+            # Step 5 & 6: Check adapter configuration compatibility.
+            # Never mount an adapter whose base model or special tokens do not match.
+            report = validate_sarvam_adapter_compatibility(
                 adapter_path=self.adapter_path,
                 base_model_id=self.base_model_id,
                 tokenizer=self.tokenizer,
-                strict=False
+                strict=False,
             )
+            if not report.get("is_compatible", False):
+                raise ValueError(report.get("error", "adapter compatibility check failed"))
 
             # Step 7: Mount LoRA adapter
             print(f"[HindiPhonemeTranslator] Mounting LoRA adapter from '{self.adapter_path}'...")
             self.model = PeftModel.from_pretrained(base_model, self.adapter_path)
             self.model.eval()
             self.is_mock = False
+            self.mock_reason = None
             print("[HindiPhonemeTranslator] Successfully loaded fine-tuned Sarvam-1 model!")
 
         except Exception as e:
+            self.mock_reason = str(e)
             print(f"[HindiPhonemeTranslator] Warning: Failed to load Sarvam model ({e}). Reverting to MOCK mode.")
             self.is_mock = True
+            self.model = None
 
     def build_prompt(self, phoneme_sequence: str) -> str:
         """Formats the input prompt using the shared S2S phoneme contract."""
@@ -243,16 +258,28 @@ def train_sarvam_lora(
 
     dataset = load_dataset("json", data_files={"train": train_jsonl_path, "val": val_jsonl_path})
 
+    max_length = 512
+    tokenizer.padding_side = "right"
+    pad_id = tokenizer.pad_token_id
+
     def tokenize_fn(batch):
         prompts = [p + t for p, t in zip(batch["prompt"], batch["target"])]
-        enc = tokenizer(prompts, max_length=512, truncation=True, padding="max_length")
+        enc = tokenizer(
+            prompts,
+            max_length=max_length,
+            truncation=True,
+            padding="max_length",
+        )
         labels = []
-        for p, t in zip(batch["prompt"], batch["target"]):
-            p_len = len(tokenizer(p, add_special_tokens=False)["input_ids"])
-            total_ids = tokenizer(p + t, max_length=512, truncation=True)["input_ids"]
-            lab = [-100] * p_len + total_ids[p_len:]
-            lab = lab + [-100] * (512 - len(lab))
-            labels.append(lab[:512])
+        for i, prompt in enumerate(batch["prompt"]):
+            prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+            total_ids = enc["input_ids"][i]
+            prompt_len = min(len(prompt_ids), len(total_ids))
+            target_ids = [
+                token if token != pad_id else -100
+                for token in total_ids[prompt_len:]
+            ]
+            labels.append([-100] * prompt_len + target_ids)
         enc["labels"] = labels
         return enc
 
@@ -281,13 +308,16 @@ def train_sarvam_lora(
         logging_steps=10
     )
 
-    trainer = Trainer(
+    trainer_kwargs = dict(
         model=model,
         args=training_args,
         train_dataset=tokenized["train"],
         eval_dataset=tokenized["val"],
-        tokenizer=tokenizer
     )
+    try:
+        trainer = Trainer(processing_class=tokenizer, **trainer_kwargs)
+    except TypeError:  # older transformers
+        trainer = Trainer(tokenizer=tokenizer, **trainer_kwargs)
 
     trainer.train()
     trainer.save_model(output_dir)

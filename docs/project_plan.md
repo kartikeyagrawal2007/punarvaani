@@ -1,5 +1,7 @@
 # Deep dive: speaking again in your own voice (Hindi lip-to-speech for voice-loss patients)
 
+> **⚠️ Historical document.** This is the pre-VALLR design (AV-HuBERT, Path A/B, voice cloning). The current repository implements the VALLR two-stage core; see [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md).
+
 ## Context
 From the shortlist (scam-call detector, lip-to-speech, sand mining), the user picked lip-to-speech. This file covers four things: what already exists, how feasible the project is, an open-ended problem statement, and the end-to-end architecture and workflow for a 4–6 month student project.
 

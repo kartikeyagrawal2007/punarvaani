@@ -15,7 +15,7 @@
 | Stage 1 | `Models/ML_VALLR.py` | Spatiotemporal ViT (tubelets) → spatial attention pool → temporal adapter → phoneme CTC |
 | Stage 2 | `Models/Sarvam.py` | Sarvam-1 (2B) + LoRA: `<PHONEMES> … </PHONEMES> <TEXT>` → Devanagari |
 | Data loader | `Data/dataset.py` | Video + transcript pairs, CTC length check, speaker-split check |
-| Tests | `tests/test_punarvaani.py` | 18 unit tests |
+| Tests | `tests/` | 71 unit/integration tests (`unittest discover`) |
 | Handover | `TEAM_GUIDE.md` | Teammate 1: dataset; Teammate 2: Sarvam-1 fine-tuning |
 
 ---
@@ -64,10 +64,9 @@ VOICE OUT (to "restore the voice", not just text)
 
 ## 3. Changes to the current code (review these first)
 
-1. **Use the whole sentence, not 16 frames.** `Data/dataset.py` and `config.py` sample **16 frames evenly from the whole video** (VALLR's original setting).
-   - A 3-second sentence has 75 frames at 25 fps and roughly 30–40 phonemes. Squeezing it into 16 frames throws away most of the lip movement, and CTC can't output more labels than time steps.
-   - **Proposal:** feed all frames at 25 fps, with variable length plus padding/masks; or use overlapping 16-frame windows with a stride and concatenate the features before CTC.
-   - This is the most important fix before training on sentences.
+1. **Use the whole sentence, not 16 frames.** *(✅ Implemented 2026-11-03.)* `Data/dataset.py` and `config.py` now read **all frames** (strided, capped by `--max_frames`), pad only at collate time, and pass per-sample CTC lengths/attention masks through `ML_VALLR`.
+   - A 3-second sentence has 75 frames at 25 fps and roughly 30–40 phonemes. The old 16-frame setting threw away most of the lip movement, and CTC could not output more labels than time steps.
+   - The model pads the temporal axis to a tubelet multiple, masks padded tokens, and optionally pools the spatial grid to `7x7` to bound attention memory. Tests cover padding invariance and `T >= U + R` capacity.
 2. **Add the character CTC head and the viseme head** to `ML_VALLR` (the VALLR-Pin idea). Devanagari is almost phonetic, so the character stream gives Sarvam-1 a second, independent view.
 3. **Extend the Sarvam-1 prompt** to n-best phonemes and n-best characters (not just the single best phoneme string), and add the noise generator for synthetic training pairs.
 4. **Add per-patient adaptation:** user-dependent padding in the Conv3d tubelet layer, plus patient LoRA in the ViT blocks.
@@ -148,7 +147,7 @@ Several of these are non-commercial. That's fine for research and the ICMR proof
 
 ## 9. Review checklist for the team
 
-- [ ] Agree to switch from 16 sampled frames to all frames (or sliding windows) for sentences?
+- [x] Switch from 16 sampled frames to all frames (implemented; `--max_frames` caps memory)?
 - [ ] Add the character CTC head + viseme head (VALLR-Pin style)?
 - [ ] Sarvam-1 prompt with n-best phonemes + characters?
 - [ ] Per-patient adaptation: padding vs LoRA vs both?

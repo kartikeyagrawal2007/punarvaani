@@ -3,8 +3,6 @@ try:
 except ImportError:
     import argparse as argparse_lib
 
-import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 import csv
 import numpy as np
 
@@ -26,7 +24,7 @@ def load_args():
     parser.add_argument('--videos_root', type=str, help="Root directory of the video dataset")
     # parser.add_argument('--audio_root', type=str, help="Root directory of the audio dataset")
     # parser.add_argument('--file_list', type=str, help="(List of) video file paths relative to videos_root, can also be regex")
-    parser.add_argument('--batch_size', type=int, default=32, help="Batch size for training")
+    parser.add_argument('--batch_size', type=int, default=4, help="Batch size for training (reduced for all-frames input)")
     parser.add_argument('--num_workers', type=int, default=4, help="Number of worker threads for loading data")
     # parser.add_argument('--whisper_model', type=str, default="base", help="Size of the whisper model to use for transcription")
 
@@ -44,17 +42,28 @@ def load_args():
     parser.add_argument('--data_dir', type=str, default=None, help="Root directory containing paired video files (dataXXX.mp4) and transcripts (dataXXX.txt)")
     parser.add_argument('--val_dir', type=str, default=None, help="Optional separate directory for validation data")
     parser.add_argument('--val_split', type=float, default=0.1, help="Fraction of data used for validation when using a single data_dir")
-    parser.add_argument('--num_frames', type=int, default=16, help="Number of frames sampled per video clip")
+    parser.add_argument('--num_frames', type=int, default=0, help="Uniformly sample this many frames per clip. 0 = use all frames (up to --max_frames)")
+    parser.add_argument('--max_frames', type=int, default=96, help="Maximum frames read per clip when --num_frames 0 (96 ~= 3.8s at 25fps)")
+    parser.add_argument('--frame_stride', type=int, default=1, help="Read every Nth frame from the source video")
     parser.add_argument('--infer_video_path', type=str, default=None, help="Path to video file for inference")
     parser.add_argument('--language', type=str, choices=['hindi', 'english'], default='hindi', help="Target language vocabulary ('hindi' or 'english')")
-    parser.add_argument('--crop_face', dest='crop_face', action='store_true', help="Use MediaPipe FaceCropper to crop face/mouth region")
-    parser.add_argument('--no_crop_face', dest='crop_face', action='store_false', help="Disable face/mouth cropping")
+    parser.add_argument('--crop_face', dest='crop_face', action='store_true', help="Enable MediaPipe mouth/face cropping")
+    parser.add_argument('--no_crop_face', dest='crop_face', action='store_false', help="Disable mouth/face cropping (use the clip as-is)")
+    parser.add_argument('--crop_mode', type=str, choices=['mouth', 'face', 'none'], default=None, help="Crop strategy. Defaults to 'mouth' when cropping is enabled, else 'none'")
+    parser.add_argument('--preprocessed', action='store_true', help="Clips are already mouth-cropped; skip cropping")
+    parser.add_argument('--allow_unknown_speakers', action='store_true', help="Allow clips directly under data_dir (random clip split instead of speaker-disjoint)")
     parser.set_defaults(crop_face=True)
+    parser.add_argument('--strict_ctc', action='store_true', help="Raise instead of warning when too many samples violate the CTC length constraint")
 
     # Architectural parameters
-    parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter (default: 4 for 16 frames)")
+    parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter")
     parser.add_argument('--max_invalid_sample_pct', type=float, default=10.0, help="Maximum allowed percentage of invalid CTC samples per epoch")
-    parser.add_argument('--eval_batch_size', type=int, default=16, help="Batch size for validation and evaluation mode")
+    parser.add_argument('--eval_batch_size', type=int, default=4, help="Batch size for validation and evaluation mode")
+    parser.add_argument('--warmup_steps', type=int, default=2000, help="Linear LR warmup steps before ReduceLROnPlateau")
+    parser.add_argument('--vit_embed_dim', type=int, default=768, help="Spatiotemporal ViT embedding dimension")
+    parser.add_argument('--vit_depth', type=int, default=8, help="Number of ViT blocks")
+    parser.add_argument('--vit_heads', type=int, default=12, help="Number of ViT attention heads")
+    parser.add_argument('--spatial_pool_tokens', type=str, default='7x7', help="Pool ViT spatial grid to HxW before attention, or 'none'")
 
     # Stage 2 LLM (Sarvam-1) configuration
     parser.add_argument('--sarvam_adapter_path', type=str, default=None, help="Path to directory containing fine-tuned Sarvam-1 LoRA adapter weights")
@@ -68,6 +77,30 @@ def load_args():
     args = parser.parse_args()
 
     return args
+
+def parse_spatial_pool_tokens(value):
+    """Parse 'HxW', 'N', or 'none' into a (H, W) tuple or None."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in ("", "none", "0"):
+        return None
+    if "x" in text:
+        height, width = text.split("x", 1)
+        return (int(height), int(width))
+    size = int(text)
+    return (size, size)
+
+
+def resolve_crop_mode(args):
+    """Resolve the effective crop mode from the CLI flags."""
+    if getattr(args, "preprocessed", False):
+        return "none"
+    explicit = getattr(args, "crop_mode", None)
+    if explicit:
+        return explicit
+    return "mouth" if getattr(args, "crop_face", True) else "none"
+
 
 def get_hindi_vocab():
     """
