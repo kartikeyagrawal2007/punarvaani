@@ -221,6 +221,10 @@ Punarvaani/
 │   ├── preflight.py           # checks the dataset/adapter before training
 │   └── make_synthetic_dataset.py
 │
+├── docs/
+│   ├── ARCHITECTURE.md        # as-built interfaces: data contract, LoRA contract, model shapes
+│   └── TRAINING_RUNBOOK.md    # exact Windows/A5000 training steps and four gates
+│
 ├── hindi_dataset/             # Teammate 1 puts data here
 ├── checkpoints/
 │   └── sarvam_lora/           # Teammate 2 puts the adapter here
@@ -228,6 +232,70 @@ Punarvaani/
 ```
 
 **Golden rule:** do not rename or move any folder or file listed above. The code expects these exact names.
+
+---
+
+## 4. How your work connects to the model (read before Part 1 or Part 2)
+
+> **Full detail:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). This section is the short version
+> you need for your own role.
+
+```text
+DATA OWNER                         TRAINING OWNER                    LORA OWNER
+    │                                   │                                │
+    ▼                                   ▼                                ▼
+hindi_dataset/  ───────────────►  Stage 1: ML_VALLR  ──────────►  Stage 2: Sarvam-1 + LoRA
+<speaker>/<clip>                  video → phonemes                 phonemes → Devanagari
+.mp4 + .txt                       55-class CTC                     exact prompt contract
+```
+
+### 4.1 The two contracts
+
+| Owner | You produce | The code expects | If it is broken |
+|---|---|---|---|
+| **Data** | `hindi_dataset/` or an explicit `--data_dir` | `<speaker>/<clip>.mp4` + `<clip>.txt`, pure Devanagari, 1.5–3 s clips, at least 2 training speakers | Dataset load fails, samples are dropped, or the model learns the wrong input |
+| **LoRA** | `checkpoints/sarvam_lora/` or an explicit `--sarvam_adapter_path` | PEFT adapter for `sarvamai/sarvam-1`, exact tags, tokenizer files | Stage 2 runs in MOCK mode and CER/WER is skipped |
+| **Training** | `checkpoints/punarvaani_stage1.pth` | Same architecture flags used during training | Checkpoint fails to load or predicts garbage |
+
+### 4.2 What Stage 1 actually consumes from the data owner
+
+1. The **first folder name** is the speaker ID. `hindi_dataset/spk01/clip.mp4` means speaker `spk01`.
+2. The video and transcript must share the base name: `clip.mp4` + `clip.txt`.
+3. The loader reads **all frames** up to `--max_frames` (default 96), or crops the mouth on the fly
+   when `--crop_mode mouth` is used.
+4. The transcript is converted to the **55-class Hindi Phoneme Inventory** by `Data/hindi_g2p.py`.
+   Word boundaries are `|`. Wrong spelling becomes wrong labels.
+5. CTC requires `T_ctc = ceil(frames/2) × 4 >= U + R` (target phonemes + adjacent repeats). Samples
+   that fail are dropped and counted in `dropped`.
+6. Validation is **speaker-disjoint**. The same person must never appear in both train and val.
+7. `scripts/preflight.py` checks all of this before training:
+   ```bash
+   python scripts/preflight.py --data_dir ./hindi_dataset --crop_mode none
+   ```
+
+### 4.3 What Stage 2 actually consumes from the LoRA owner
+
+1. The exact prompt tags: `<S2S>`, `<PHONEMES>`, `</PHONEMES>`, `<TEXT>`.
+2. Each tag must encode as **one token**, not split into subwords.
+3. The adapter must be trained from exactly `sarvamai/sarvam-1`.
+4. The folder must contain `adapter_config.json`, the adapter weights, and the tokenizer files.
+5. If anything is missing or mismatched, `Models/Sarvam.py` refuses to mount it and runs in
+   **MOCK mode** with a printed reason. Evaluation then skips CER/WER.
+6. Stage-2 training data is **text-only**: Hindi corpus → G2P phonemes → synthetic viseme noise →
+   JSONL `{prompt, target}`. It does not need the video dataset.
+
+### 4.4 If something is wrong, whose part is it?
+
+| Symptom | Likely owner | Check |
+|---|---|---|
+| `No valid video/transcript pairs` | Data | File names and speaker folders |
+| `fewer than 2 speaker folders` | Data | Split by speaker; add speakers |
+| `invalid CTC samples` | Data | Clip length vs transcript length |
+| `crop_mode mouth requires MediaPipe` | Environment / Training | `pip install mediapipe` or `--preprocessed` |
+| `MOCK mode` in eval | LoRA | Adapter files, base model, tokenizer tags |
+| `adapter base model ... does not match` | LoRA | Retrain from `sarvamai/sarvam-1` |
+| Loss flat, PER stuck | Data / Training | Crops, transcripts, `dropped`, learning setup |
+| CER/WER missing | LoRA | Adapter did not load; read the reason |
 
 ---
 
@@ -259,6 +327,12 @@ Rules that the code enforces:
 2. Every video has a transcript with the **same base name** and a `.txt` extension.
 3. There must be **at least two speaker folders**, so the validation set can contain a person the model has not seen during training.
 4. Names should be ASCII, lowercase, and contain no spaces. Use `spk01_001`, not `Speaker One (final).mp4`.
+
+> **Why this matters downstream:** the loader discovers pairs automatically, uses the first folder
+> as the speaker ID, and enforces speaker-disjoint validation. If a video has no matching `.txt`,
+> the sample is skipped. If the speaker folders are wrong, the dataset refuses to load. If the
+> transcript is not pure Devanagari, the phoneme converter produces label noise. The full interface
+> is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), section 3.
 
 ## 1.2 How much data to collect
 
@@ -475,6 +549,12 @@ checkpoints/sarvam_lora/
 This adapter teaches Sarvam-1 to turn noisy phoneme sequences into correct Hindi sentences.
 
 You do **not** need the video dataset for this role. You can start immediately using a Hindi text corpus.
+
+> **Why the folder must look exactly like this:** `Models/Sarvam.py` loads the adapter, checks
+> `adapter_config.json`, verifies the base model is `sarvamai/sarvam-1`, and verifies that the four
+> special tags each encode as one token. If any check fails, it refuses to mount the adapter and
+> falls back to MOCK mode with a printed reason; evaluation then skips CER/WER. The full loader
+> contract is in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), section 4.
 
 ## 2.2 How Stage 2 works
 
