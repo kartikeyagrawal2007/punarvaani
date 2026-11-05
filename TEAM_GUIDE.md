@@ -5,6 +5,10 @@
 > **How to use this guide:** read Sections 0–4 once, then jump to your role. Copy commands exactly, one block at a time. Do not type the `PS C:\...>` or `$` symbols you see in examples — those are just the prompt.
 >
 > If anything in this guide does not match what you see on your screen, stop and ask the team lead before changing files.
+>
+> **Training the Stage-1 model on the college Windows/A5000 PC?** Follow the dedicated
+> [`docs/TRAINING_RUNBOOK.md`](docs/TRAINING_RUNBOOK.md) instead of Part 3 below. It covers the
+> full setup, data placement, the four pre-training gates, full training, monitoring and evaluation.
 
 ---
 

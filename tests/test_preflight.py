@@ -51,6 +51,15 @@ class TestPreflightDataset(unittest.TestCase):
         finally:
             shutil.rmtree(root_dir, ignore_errors=True)
 
+    def test_single_speaker_split_can_be_allowed(self):
+        single = tempfile.mkdtemp(prefix="vallr_preflight_single_")
+        try:
+            create_synthetic_dataset(single, speakers=1, clips=1, seconds=0.4, size=(32, 32))
+            self.assertTrue(scan_dataset(single)["blocking"])
+            self.assertEqual(scan_dataset(single, min_speakers=1)["blocking"], [])
+        finally:
+            shutil.rmtree(single, ignore_errors=True)
+
     def test_main_exit_codes(self):
         output = os.path.join(self.tmp, "report.json")
         self.assertEqual(

@@ -116,6 +116,7 @@ def scan_dataset(
     temporal_upsample_factor: int = 4,
     max_invalid_sample_pct: float = 10.0,
     allow_unknown_speakers: bool = False,
+    min_speakers: int = 2,
 ) -> dict:
     vocab = get_hindi_vocab()
     clear_unsupported_char_log()
@@ -231,8 +232,10 @@ def scan_dataset(
         blocking.append("no video files found")
     if report["pairs"] == 0:
         blocking.append("no valid video/transcript pairs")
-    if len(report["speakers"]) < 2 and not allow_unknown_speakers:
-        blocking.append("fewer than 2 speaker folders (speaker-disjoint split impossible)")
+    if len(report["speakers"]) < min_speakers and not allow_unknown_speakers:
+        blocking.append(
+            f"fewer than {min_speakers} speaker folders (speaker-disjoint split impossible)"
+        )
 
     if report["pairs"]:
         report["invalid_pct"] = len(report["invalid_ctc"]) / report["pairs"] * 100.0
@@ -339,6 +342,12 @@ def main(argv=None):
     parser.add_argument("--max_invalid_sample_pct", type=float, default=10.0)
     parser.add_argument("--allow_unknown_speakers", action="store_true")
     parser.add_argument(
+        "--min_speakers",
+        type=int,
+        default=2,
+        help="Minimum speaker folders required (use 1 for a held-out val/test split)",
+    )
+    parser.add_argument(
         "--crop_mode",
         choices=["mouth", "face", "none"],
         default="mouth",
@@ -357,6 +366,7 @@ def main(argv=None):
             temporal_upsample_factor=args.temporal_upsample_factor,
             max_invalid_sample_pct=args.max_invalid_sample_pct,
             allow_unknown_speakers=args.allow_unknown_speakers,
+            min_speakers=args.min_speakers,
         )
         report["blocking"].extend(report["dataset"]["blocking"])
         report["warnings"].extend(report["dataset"]["warnings"])
