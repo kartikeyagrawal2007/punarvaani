@@ -7,6 +7,11 @@
 
 > **Punarvaani** (*Punar* = Re-/Restore, *Vaani* = Voice/Speech) is an end-to-end, two-stage **Visual Automatic Speech Recognition (VASR) / Lip-Reading system tailored for the Hindi language**. By reading silent mouth movements from video, Punarvaani predicts Hindi phoneme sequences and uses an Indic Large Language Model to restore complete, grammatically fluent Devanagari Hindi speech.
 
+> **New to the codebase?**
+> - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — as-built pipeline, tensor shapes, and the exact dataset/LoRA contracts.
+> - [`docs/TRAINING_RUNBOOK.md`](docs/TRAINING_RUNBOOK.md) — clone-to-checkpoint training guide with four pre-training gates.
+> - [`TEAM_GUIDE.md`](TEAM_GUIDE.md) — beginner onboarding for the data and LoRA roles.
+
 ---
 
 ## 🙏 Acknowledgments & Foundational Architecture

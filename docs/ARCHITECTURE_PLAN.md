@@ -1,5 +1,9 @@
 # Punarvaani: architecture plan, VALLR core (DRAFT for team review)
 
+> **As-built companion:** this file is the forward-looking plan. For what the code actually does
+> today — including the exact dataset and LoRA-adapter contracts — read
+> [`ARCHITECTURE.md`](ARCHITECTURE.md).
+>
 > **Status:** draft v2, 1 Nov 2026. This replaces the earlier multi-encoder plan.
 > **Decision:** **VALLR is the core.** The repo's `main` is now a VALLR-based codebase (`Models/ML_VALLR.py`, `Models/Sarvam.py`, `Data/hindi_g2p.py`, `face_cropper.py`).
 > This plan says what to keep, what to add from the literature review (44 papers), what to compare against, and what is postponed.
@@ -15,8 +19,10 @@
 | Stage 1 | `Models/ML_VALLR.py` | Spatiotemporal ViT (tubelets) → spatial attention pool → temporal adapter → phoneme CTC |
 | Stage 2 | `Models/Sarvam.py` | Sarvam-1 (2B) + LoRA: `<PHONEMES> … </PHONEMES> <TEXT>` → Devanagari |
 | Data loader | `Data/dataset.py` | Video + transcript pairs, CTC length check, speaker-split check |
-| Tests | `tests/` | 71 unit/integration tests (`unittest discover`) |
-| Handover | `TEAM_GUIDE.md` | Teammate 1: dataset; Teammate 2: Sarvam-1 fine-tuning |
+| Tests | `tests/` | 73 unit/integration tests (`unittest discover`) |
+| Preflight | `scripts/preflight.py` | validates dataset, adapter, runtime, GPU and disk |
+| Synthetic smoke data | `Data/synthetic.py`, `scripts/make_synthetic_dataset.py` | CPU plumbing tests |
+| Handover | `TEAM_GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/TRAINING_RUNBOOK.md` | dataset, adapter, training |
 
 ---
 
