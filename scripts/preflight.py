@@ -10,10 +10,13 @@ Usage:
 """
 
 import argparse
+import importlib
 import json
 import math
 import os
+import platform
 import re
+import shutil
 import sys
 from typing import Optional
 
@@ -48,6 +51,62 @@ def _ctc_min(ids):
         return 0
     repeats = sum(1 for a, b in zip(ids, ids[1:]) if a == b)
     return len(ids) + repeats
+
+
+def check_dependencies() -> dict:
+    """Report which runtime packages are importable in this environment."""
+    modules = {
+        "torch": "torch",
+        "numpy": "numpy",
+        "cv2": "cv2",
+        "mediapipe": "mediapipe",
+        "decord": "decord",
+        "transformers": "transformers",
+        "peft": "peft",
+        "tqdm": "tqdm",
+    }
+    report = {}
+    for name, module_name in modules.items():
+        try:
+            module = importlib.import_module(module_name)
+            report[name] = {
+                "installed": True,
+                "version": str(getattr(module, "__version__", "unknown")),
+            }
+        except Exception as exc:
+            report[name] = {"installed": False, "error": str(exc)}
+    return report
+
+
+def check_runtime(data_dir: Optional[str] = None) -> dict:
+    """Python/GPU/disk state plus the dependency report."""
+    report = {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "dependencies": check_dependencies(),
+        "cuda_available": None,
+        "gpu": None,
+        "gpu_memory_gb": None,
+        "disk_free_gb": None,
+    }
+    try:
+        import torch
+
+        report["cuda_available"] = bool(torch.cuda.is_available())
+        if report["cuda_available"]:
+            report["gpu"] = torch.cuda.get_device_name(0)
+            report["gpu_memory_gb"] = round(
+                torch.cuda.get_device_properties(0).total_memory / 1e9, 1
+            )
+    except Exception as exc:
+        report["torch_error"] = str(exc)
+
+    target = data_dir or os.getcwd()
+    try:
+        report["disk_free_gb"] = round(shutil.disk_usage(target).free / 1e9, 1)
+    except Exception:
+        pass
+    return report
 
 
 def scan_dataset(
@@ -244,7 +303,26 @@ def check_adapter(adapter_path: Optional[str], expected_base: str = "sarvamai/sa
         return report
 
     if not report["files"]["tokenizer_config.json"]:
-        report["warnings"].append("adapter directory has no tokenizer files; base tokenizer will be used")
+        report["warnings"].append(
+            "adapter directory has no tokenizer files; the base tokenizer will be used"
+        )
+    else:
+        # Verify the exact tag contract used at inference, without downloading anything.
+        try:
+            from transformers import AutoTokenizer
+            from Models.Sarvam import TAGS
+
+            tokenizer = AutoTokenizer.from_pretrained(adapter_path, local_files_only=True)
+            split_tags = [
+                tag for tag in TAGS
+                if len(tokenizer.encode(tag, add_special_tokens=False)) != 1
+            ]
+            if split_tags:
+                report["blocking"].append(
+                    f"special tokens split into multiple subwords: {split_tags}"
+                )
+        except Exception as exc:
+            report["warnings"].append(f"could not verify tokenizer tags: {exc}")
 
     report["compatible"] = not report["blocking"]
     return report
@@ -260,10 +338,17 @@ def main(argv=None):
     parser.add_argument("--temporal_upsample_factor", type=int, default=4)
     parser.add_argument("--max_invalid_sample_pct", type=float, default=10.0)
     parser.add_argument("--allow_unknown_speakers", action="store_true")
+    parser.add_argument(
+        "--crop_mode",
+        choices=["mouth", "face", "none"],
+        default="mouth",
+        help="How training will crop frames; use 'none' for already-cropped clips",
+    )
     parser.add_argument("--output", type=str, default="preflight_report.json")
     args = parser.parse_args(argv)
 
-    report = {"dataset": None, "adapter": None, "blocking": []}
+    report = {"dataset": None, "adapter": None, "runtime": None, "blocking": [], "warnings": []}
+
     if args.data_dir:
         report["dataset"] = scan_dataset(
             args.data_dir,
@@ -274,10 +359,42 @@ def main(argv=None):
             allow_unknown_speakers=args.allow_unknown_speakers,
         )
         report["blocking"].extend(report["dataset"]["blocking"])
+        report["warnings"].extend(report["dataset"]["warnings"])
 
     if args.sarvam_adapter_path:
         report["adapter"] = check_adapter(args.sarvam_adapter_path, args.sarvam_base_model)
         report["blocking"].extend(report["adapter"]["blocking"])
+        report["warnings"].extend(report["adapter"]["warnings"])
+
+    report["runtime"] = check_runtime(args.data_dir)
+    deps = report["runtime"]["dependencies"]
+
+    for required in ("torch", "numpy", "cv2"):
+        if not deps[required]["installed"]:
+            report["blocking"].append(f"required package is missing: {required}")
+
+    if not deps["mediapipe"]["installed"]:
+        if args.crop_mode in ("mouth", "face"):
+            report["blocking"].append(
+                f"--crop_mode {args.crop_mode} requires mediapipe, which is not installed. "
+                "Install it, or pass --crop_mode none only if clips are already cropped."
+            )
+        else:
+            report["warnings"].append(
+                "mediapipe is not installed, but --crop_mode none does not need it"
+            )
+    if not deps["decord"]["installed"]:
+        report["warnings"].append("decord is not installed; OpenCV video decoding will be used")
+
+    if args.sarvam_adapter_path:
+        for package in ("transformers", "peft"):
+            if not deps[package]["installed"]:
+                report["warnings"].append(
+                    f"{package} is not installed: Stage 2 will fall back to MOCK mode"
+                )
+
+    if report["runtime"].get("cuda_available") is False:
+        report["warnings"].append("CUDA is not available: training will fall back to CPU")
 
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
@@ -292,10 +409,21 @@ def main(argv=None):
     if report["adapter"]:
         ad = report["adapter"]
         print(f"  adapter: compatible={ad['compatible']} path={ad.get('path')}")
+    if report["runtime"]:
+        rt = report["runtime"]
+        print(
+            f"  runtime: python {rt['python']}, CUDA={rt['cuda_available']}, "
+            f"GPU={rt.get('gpu')}, disk_free={rt.get('disk_free_gb')} GB"
+        )
+
+    if report["warnings"]:
+        print("\nWARNINGS:")
+        for warning in dict.fromkeys(report["warnings"]):
+            print(f"  - {warning}")
 
     if report["blocking"]:
         print("\nBLOCKING ISSUES:")
-        for issue in report["blocking"]:
+        for issue in dict.fromkeys(report["blocking"]):
             print(f"  - {issue}")
         return 1
     print("Preflight OK")

@@ -1,19 +1,43 @@
-# Hindi Dataset Directory
+# Hindi Dataset Drop Folder
 
-Drop your paired video and transcript files directly into this directory:
+Put the dataset here in **speaker subfolders**. Each video must have a transcript with the
+same base name.
 
 ```text
 hindi_dataset/
-├── data001.mp4
-├── data001.txt       <-- Contains Devanagari text (e.g., "नमस्ते भारत")
-├── data002.mp4
-├── data002.txt       <-- Contains Devanagari text
-├── ...
-├── data999.mp4
-└── data999.txt
+├── spk01/
+│   ├── spk01_001.mp4
+│   ├── spk01_001.txt
+│   ├── spk01_002.mp4
+│   └── spk01_002.txt
+├── spk02/
+│   ├── spk02_001.mp4
+│   └── spk02_001.txt
+└── spk03/
+    └── ...
 ```
 
-### Notes:
-- Each video file (`.mp4`, `.avi`, `.mov`, `.mkv`) must have a corresponding `.txt` file with the exact same base name.
-- The `.txt` file should contain UTF-8 encoded Hindi Devanagari text.
-- By default, `--val_split 0.1` will automatically split 10% of these files for validation.
+Rules:
+
+- At least **two speaker folders** are required (the validation split is speaker-disjoint).
+- Clips should be **1.5–3 seconds**, frontal, mouth unobstructed.
+- Transcripts must be **UTF-8 Devanagari only** (no English letters or digits; spell numbers out).
+- Do not place videos directly in `hindi_dataset/`; they must be inside `spkXX/`.
+- Dataset contents are gitignored; they are never committed.
+
+Validate the drop before training:
+
+```bash
+python scripts/preflight.py --data_dir ./hindi_dataset --output ./preflight_report.json
+```
+
+Add `--crop_mode none` if the clips are already mouth-cropped (otherwise preflight expects
+MediaPipe for on-the-fly cropping).
+
+Optional: crop raw videos into mouth ROIs first:
+
+```bash
+python scripts/preprocess_lips.py --input_dir ./raw_videos --output_dir ./hindi_dataset --max_frames 96 --frame_size 224
+```
+
+See `TEAM_GUIDE.md` Part 1 for the full dataset instructions.

@@ -50,7 +50,11 @@ def load_inference_video(
                 min_landmark_detector_confidence=0.5,
             )
         except Exception as exc:
-            print(f"[transcribe_video] Notice: FaceCropper unavailable ({exc}). Using full frames.")
+            raise RuntimeError(
+                f"crop_mode='{crop_mode}' requires MediaPipe, but it is unavailable: {exc}. "
+                "Install it with `pip install mediapipe` or pass crop_mode='none' "
+                "for an already-cropped video."
+            ) from exc
 
     video_np = dataset_helper._load_video_frames(video_path)
     if video_np is None:

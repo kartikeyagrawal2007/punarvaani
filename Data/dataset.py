@@ -253,20 +253,22 @@ class HindiVideoDataset(Dataset):
         self.face_cropper = None
         if self.crop_mode != "none":
             if not HAS_FACE_CROPPER:
-                print(
-                    "[HindiVideoDataset] Warning: mediapipe/FaceCropper unavailable; "
-                    "falling back to resizing the full frame."
+                raise RuntimeError(
+                    f"crop_mode='{self.crop_mode}' requires MediaPipe, but it is not installed. "
+                    "Install it with `pip install mediapipe`, or pass --preprocessed "
+                    "(if the clips are already mouth-cropped) / --crop_mode none."
                 )
-            else:
-                try:
-                    self.face_cropper = FaceCropper(
-                        min_face_detector_confidence=0.5,
-                        face_detector_model_selection="SHORT_RANGE",
-                        landmark_detector_static_image_mode="STATIC_MODE",
-                        min_landmark_detector_confidence=0.5,
-                    )
-                except Exception as exc:  # pragma: no cover - env dependent
-                    print(f"[HindiVideoDataset] Warning: could not initialise FaceCropper: {exc}")
+            try:
+                self.face_cropper = FaceCropper(
+                    min_face_detector_confidence=0.5,
+                    face_detector_model_selection="SHORT_RANGE",
+                    landmark_detector_static_image_mode="STATIC_MODE",
+                    min_landmark_detector_confidence=0.5,
+                )
+            except Exception as exc:  # pragma: no cover - env dependent
+                raise RuntimeError(
+                    f"Could not initialise FaceCropper for crop_mode='{self.crop_mode}': {exc}"
+                ) from exc
 
         print(
             f"[HindiVideoDataset] Loaded {len(self.samples)} samples for '{split}' "

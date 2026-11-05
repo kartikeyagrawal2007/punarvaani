@@ -53,11 +53,27 @@ class TestPreflightDataset(unittest.TestCase):
 
     def test_main_exit_codes(self):
         output = os.path.join(self.tmp, "report.json")
-        self.assertEqual(preflight_main(["--data_dir", self.tmp, "--output", output]), 0)
+        self.assertEqual(
+            preflight_main(
+                ["--data_dir", self.tmp, "--crop_mode", "none", "--output", output]
+            ),
+            0,
+        )
         self.assertTrue(os.path.exists(output))
 
+        with open(output, "r", encoding="utf-8") as handle:
+            report = json.load(handle)
+        self.assertIn("runtime", report)
+        self.assertIn("dependencies", report["runtime"])
+        self.assertIn("mediapipe", report["runtime"]["dependencies"])
+
         os.remove(os.path.join(self.tmp, "spk02", "spk02_001.txt"))
-        self.assertEqual(preflight_main(["--data_dir", self.tmp, "--output", output]), 1)
+        self.assertEqual(
+            preflight_main(
+                ["--data_dir", self.tmp, "--crop_mode", "none", "--output", output]
+            ),
+            1,
+        )
 
 
 class TestPreflightAdapter(unittest.TestCase):

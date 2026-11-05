@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import unittest
 
-from Data.dataset import HindiVideoDataset
+from Data.dataset import HAS_FACE_CROPPER, HindiVideoDataset
 from Data.synthetic import create_synthetic_dataset
 from config import get_hindi_vocab
 
@@ -132,6 +132,13 @@ class TestHindiVideoDataset(unittest.TestCase):
                 max_frames=4,
                 max_invalid_sample_pct=0.0,
                 strict_ctc=True,
+            )
+
+    @unittest.skipIf(HAS_FACE_CROPPER, "mediapipe is installed in this environment")
+    def test_mouth_crop_without_mediapipe_fails_fast(self):
+        with self.assertRaises(RuntimeError):
+            self.make_dataset(
+                "train", is_dedicated_split=True, crop_mode="mouth"
             )
 
     def test_invalid_fraction_is_reported(self):

@@ -381,6 +381,8 @@ This checks every pair, transcript, speaker folder, and CTC length before anyone
 python scripts/preflight.py --data_dir ./hindi_dataset --output ./preflight_report.json
 ```
 
+By default, preflight assumes training will crop mouths on the fly (`--crop_mode mouth`), so it requires MediaPipe. If you already ran `preprocess_lips.py` and will train with `--preprocessed`, add `--crop_mode none`.
+
 Expected ending:
 
 ```text
@@ -445,7 +447,7 @@ Before you say "done":
 | `invalid CTC samples ...` | Transcript too long for the clip | Shorten the sentence or add frames (up to `--max_frames 96`) |
 | Crop success below 95% | Face turned, dark lighting, mouth covered | Re-record those clips following Section 1.3 |
 | G2P warns about a character | English letter, digit, or symbol in `.txt` | Rewrite the transcript in pure Devanagari |
-| `MediaPipe ... unavailable` | MediaPipe not installed | `pip install mediapipe` |
+| `MediaPipe ... unavailable` | MediaPipe not installed; training now stops instead of silently using full frames | `pip install mediapipe`, or use `--preprocessed` only if the clips are already mouth-cropped |
 | Video will not open | Unusual codec | Re-encode with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p output.mp4` |
 | `Permission denied` when writing output | `hindi_dataset/` is open in another program | Close it and run again |
 
