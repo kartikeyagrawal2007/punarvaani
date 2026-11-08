@@ -140,8 +140,22 @@ class HindiPhonemeTranslator:
 
             # Step 1: Check if adapter directory contains tokenizer files
             tokenizer_source = self.adapter_path if (self.adapter_path and os.path.exists(os.path.join(self.adapter_path, "tokenizer_config.json"))) else self.base_model_id
-            print(f"[HindiPhonemeTranslator] Loading tokenizer from '{tokenizer_source}'...")
-            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, use_fast=True)
+            print(f"[HindiPhonemeTranslator] Loading tokenizer from '{tokenizer_source}'...", flush=True)
+            try:
+                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_source, use_fast=True)
+            except Exception as exc:
+                if tokenizer_source == self.base_model_id:
+                    raise
+                # tokenizer.save_pretrained() on a fast Llama tokenizer can omit
+                # tokenizer.model while tokenizer_config.json still says
+                # LlamaTokenizer. Fall back to the base tokenizer; the missing
+                # tags are added below and keep the same token IDs.
+                print(
+                    f"[HindiPhonemeTranslator] Adapter tokenizer failed ({exc}); "
+                    "falling back to the base Sarvam tokenizer.",
+                    flush=True,
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_id, use_fast=True)
 
             # Step 2 & 3: Check and register missing special tokens
             missing_tokens = [t for t in TAGS if t not in self.tokenizer.get_vocab()]
@@ -241,51 +255,113 @@ def train_sarvam_lora(
     base_model_id: str = "sarvamai/sarvam-1",
     epochs: int = 5,
     batch_size: int = 4,
-    lr: float = 2e-4
+    lr: float = 2e-4,
+    max_length: int = 512,
+    gradient_accumulation_steps: int = 1,
+    eval_steps: int = 500,
+    resume_from_checkpoint: Optional[str] = None,
+    bf16: Optional[bool] = None,
 ):
     """
     Utility function for the teammate fine-tuning Sarvam-1.
-    Expects JSONL files with rows: {"prompt": "<S2S>\\n...", "target": "नमस्ते"}
+    Expects JSONL files with rows: {"prompt": "<S2S>\\n...", "target": "नमस्ते"}.
+
+    The four tags (<S2S>, <PHONEMES>, </PHONEMES>, <TEXT>) are new tokens. Their
+    embedding rows are included in the saved adapter via modules_to_save so the
+    repo's HindiPhonemeTranslator sees the same vectors used during training.
     """
+    import inspect
+
     from datasets import load_dataset
     from peft import LoraConfig, get_peft_model, TaskType
     from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
+
+    # bf16 does not use GradScaler. If the GPU cannot do bf16, load the model
+    # in fp32 and let fp16 autocast + GradScaler handle the mixed precision.
+    if bf16 is None:
+        bf16 = bool(
+            torch.cuda.is_available()
+            and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+        )
+    use_fp16 = bool(torch.cuda.is_available() and not bf16)
+    print(f"[Sarvam] precision: {'bf16' if bf16 else ('fp16' if use_fp16 else 'fp32')}")
 
     tokenizer = AutoTokenizer.from_pretrained(base_model_id, use_fast=True)
     tokenizer.add_special_tokens({"additional_special_tokens": TAGS})
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
     dataset = load_dataset("json", data_files={"train": train_jsonl_path, "val": val_jsonl_path})
 
-    max_length = 512
-    tokenizer.padding_side = "right"
     pad_id = tokenizer.pad_token_id
+    eos_id = tokenizer.eos_token_id
+    stats = {
+        "empty_target": 0,
+        "truncated": 0,
+        "prompt_too_long": 0,
+        "bad_prompt": 0,
+        "crlf": 0,
+    }
 
     def tokenize_fn(batch):
-        prompts = [p + t for p, t in zip(batch["prompt"], batch["target"])]
-        enc = tokenizer(
-            prompts,
-            max_length=max_length,
-            truncation=True,
-            padding="max_length",
+        input_ids, attention_mask, labels = [], [], []
+        for prompt, target in zip(batch["prompt"], batch["target"]):
+            if not target.strip():
+                stats["empty_target"] += 1
+            if not all(tag in prompt for tag in TAGS):
+                stats["bad_prompt"] += 1
+            if "\r" in prompt:
+                stats["crlf"] += 1
+
+            # The tokenizer adds BOS to the prompt (add_bos_token=True) but not
+            # EOS to the target (add_eos_token=False), so EOS is appended here.
+            prompt_ids = tokenizer(prompt, add_special_tokens=True)["input_ids"]
+            target_ids = tokenizer(target, add_special_tokens=False)["input_ids"] + [eos_id]
+
+            if len(prompt_ids) >= max_length:
+                stats["prompt_too_long"] += 1
+
+            ids = prompt_ids + target_ids
+            lab = [-100] * len(prompt_ids) + target_ids
+
+            if len(ids) > max_length:
+                stats["truncated"] += 1
+                ids = ids[:max_length]
+                lab = lab[:max_length]
+
+            pad = max_length - len(ids)
+            input_ids.append(ids + [pad_id] * pad)
+            attention_mask.append([1] * len(ids) + [0] * pad)
+            labels.append(lab + [-100] * pad)
+
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+
+    tokenized = dataset.map(
+        tokenize_fn,
+        batched=True,
+        remove_columns=dataset["train"].column_names,
+    )
+
+    print(f"[Sarvam] tokenization stats: {stats}")
+    if stats["empty_target"] or stats["bad_prompt"] or stats["crlf"]:
+        print(
+            "[Sarvam] WARNING: empty targets, prompts missing tags, or CRLF characters found. "
+            "Fix the JSONL before trusting the adapter."
         )
-        labels = []
-        for i, prompt in enumerate(batch["prompt"]):
-            prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-            total_ids = enc["input_ids"][i]
-            prompt_len = min(len(prompt_ids), len(total_ids))
-            target_ids = [
-                token if token != pad_id else -100
-                for token in total_ids[prompt_len:]
-            ]
-            labels.append([-100] * prompt_len + target_ids)
-        enc["labels"] = labels
-        return enc
+    if stats["truncated"] or stats["prompt_too_long"]:
+        print(
+            f"[Sarvam] WARNING: some samples exceed max_length={max_length}. "
+            "Targets may be truncated; check the prompt/target length distribution."
+        )
 
-    tokenized = dataset.map(tokenize_fn, batched=True)
-
-    model = AutoModelForCausalLM.from_pretrained(base_model_id, torch_dtype=torch.float16, device_map="auto")
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model_id,
+        torch_dtype=torch.bfloat16 if bf16 else torch.float32,
+    )
+    if torch.cuda.is_available():
+        model.to("cuda")
+    model.config.use_cache = False
     model.resize_token_embeddings(len(tokenizer))
 
     lora_cfg = LoraConfig(
@@ -294,19 +370,43 @@ def train_sarvam_lora(
         lora_dropout=0.05,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        modules_to_save=["embed_tokens", "lm_head"],
     )
     model = get_peft_model(model, lora_cfg)
+    model.print_trainable_parameters()
+    print(
+        "[Sarvam] embed_tokens/lm_head are saved with the adapter so the four new tags "
+        "survive save/load; expect a roughly 500-600 MB adapter."
+    )
 
-    training_args = TrainingArguments(
+    # Transformers renamed evaluation_strategy -> eval_strategy. Pick the
+    # argument the installed version actually accepts, otherwise
+    # load_best_model_at_end sees evaluation_strategy="no" and raises ValueError.
+    training_kwargs = dict(
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=gradient_accumulation_steps,
         num_train_epochs=epochs,
         learning_rate=lr,
-        fp16=True,
-        save_total_limit=2,
-        logging_steps=10
+        fp16=use_fp16,
+        bf16=bf16,
+        eval_steps=eval_steps,
+        save_strategy="steps",
+        save_steps=eval_steps,
+        save_total_limit=5,
+        logging_steps=50,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        prediction_loss_only=True,
+        report_to="none",
     )
+    training_params = inspect.signature(TrainingArguments.__init__).parameters
+    eval_arg = "eval_strategy" if "eval_strategy" in training_params else "evaluation_strategy"
+    training_kwargs[eval_arg] = "steps"
+    training_args = TrainingArguments(**training_kwargs)
 
     trainer_kwargs = dict(
         model=model,
@@ -314,12 +414,18 @@ def train_sarvam_lora(
         train_dataset=tokenized["train"],
         eval_dataset=tokenized["val"],
     )
-    try:
+    trainer_params = inspect.signature(Trainer.__init__).parameters
+    if "processing_class" in trainer_params:
         trainer = Trainer(processing_class=tokenizer, **trainer_kwargs)
-    except TypeError:  # older transformers
+    else:
         trainer = Trainer(tokenizer=tokenizer, **trainer_kwargs)
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"Fine-tuned Sarvam-1 adapter saved to {output_dir}")
+    print(f"[Sarvam] Fine-tuned Sarvam-1 adapter saved to {output_dir}")
+    print(
+        "[Sarvam] Check that adapter_model.safetensors is roughly 500-600 MB. "
+        "If it is only 20-40 MB, the tag embeddings were not saved; do not paste it."
+    )
+    return trainer
