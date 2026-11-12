@@ -1,0 +1,47 @@
+test_all_invalid_returns_empty_batch (test_collate.TestCustomCollate.test_all_invalid_returns_empty_batch) ... ok
+test_drops_samples_that_violate_ctc_constraint (test_collate.TestCustomCollate.test_drops_samples_that_violate_ctc_constraint) ... ok
+test_legacy_tuple_and_fixed_t_ctc (test_collate.TestCustomCollate.test_legacy_tuple_and_fixed_t_ctc) ... ok
+test_none_items_are_ignored (test_collate.TestCustomCollate.test_none_items_are_ignored) ... ok
+test_pads_to_max_frames_and_sets_lengths (test_collate.TestCustomCollate.test_pads_to_max_frames_and_sets_lengths) ... ok
+test_all_frames_are_loaded (test_dataset.TestHindiVideoDataset.test_all_frames_are_loaded) ... ok
+test_dedicated_split_uses_everything (test_dataset.TestHindiVideoDataset.test_dedicated_split_uses_everything) ... ok
+test_invalid_fraction_is_reported (test_dataset.TestHindiVideoDataset.test_invalid_fraction_is_reported) ... ok
+test_missing_transcript_is_skipped (test_dataset.TestHindiVideoDataset.test_missing_transcript_is_skipped) ... ok
+test_mouth_crop_without_mediapipe_fails_fast (test_dataset.TestHindiVideoDataset.test_mouth_crop_without_mediapipe_fails_fast) ... ok
+test_root_level_clips_require_flag (test_dataset.TestHindiVideoDataset.test_root_level_clips_require_flag) ... ok
+test_single_speaker_cannot_make_disjoint_split (test_dataset.TestHindiVideoDataset.test_single_speaker_cannot_make_disjoint_split) ... ok
+test_split_is_deterministic (test_dataset.TestHindiVideoDataset.test_split_is_deterministic) ... ok
+test_split_is_speaker_disjoint (test_dataset.TestHindiVideoDataset.test_split_is_speaker_disjoint) ... ok
+test_strict_ctc_precheck_raises (test_dataset.TestHindiVideoDataset.test_strict_ctc_precheck_raises) ... ok
+test_inference_signature_uses_stage1_model_path (test_docs.TestDocumentedApi.test_inference_signature_uses_stage1_model_path) ... ok
+test_readme_examples_match_the_api (test_docs.TestDocumentedApi.test_readme_examples_match_the_api) ... ok
+test_every_emitted_token_is_in_vocabulary (test_g2p.TestHindiG2PGoldenTable.test_every_emitted_token_is_in_vocabulary) ... ok
+test_golden_transcriptions (test_g2p.TestHindiG2PGoldenTable.test_golden_transcriptions) ... ok
+test_multiword_sentence (test_g2p.TestHindiG2PGoldenTable.test_multiword_sentence) ... ok
+test_unsupported_characters_are_logged (test_g2p.TestHindiG2PGoldenTable.test_unsupported_characters_are_logged) ... [Hindi G2P] Unsupported character 'a' in word 'abc' [transcript: clip_7]
+[Hindi G2P] Unsupported character 'b' in word 'abc' [transcript: clip_7]
+[Hindi G2P] Unsupported character 'c' in word 'abc' [transcript: clip_7]
+[Hindi G2P] Unsupported character '1' in word '123' [transcript: clip_7]
+[Hindi G2P] Unsupported character '2' in word '123' [transcript: clip_7]
+[Hindi G2P] Unsupported character '3' in word '123' [transcript: clip_7]
+ok
+test_cpu_amp_uses_no_scaler (test_mixed_precision.TestMixedPrecisionCTC.test_cpu_amp_uses_no_scaler) ... ok
+test_ctc_loss_is_finite_under_autocast (test_mixed_precision.TestMixedPrecisionCTC.test_ctc_loss_is_finite_under_autocast) ... ok
+test_fp32_cast_is_applied (test_mixed_precision.TestMixedPrecisionCTC.test_fp32_cast_is_applied) ... ok
+test_accepts_time_first_layout (test_model_lengths.TestVariableLengthModel.test_accepts_time_first_layout) ... ok
+test_batched_lengths_and_logit_shape (test_model_lengths.TestVariableLengthModel.test_batched_lengths_and_logit_shape) ... ok
+test_input_lengths_never_exceed_available_steps (test_model_lengths.TestVariableLengthModel.test_input_lengths_never_exceed_available_steps) ... ok
+test_no_lengths_uses_full_clip (test_model_lengths.TestVariableLengthModel.test_no_lengths_uses_full_clip) ... ok
+test_padding_does_not_change_real_frames (test_model_lengths.TestVariableLengthModel.test_padding_does_not_change_real_frames) ... ok
+test_padding_invariance_with_spatial_token_pooling (test_model_lengths.TestVariableLengthModel.test_padding_invariance_with_spatial_token_pooling) ... ok
+test_box_contains_points_and_is_square (test_mouth_geometry.TestMouthGeometry.test_box_contains_points_and_is_square) ... ok
+test_box_is_clamped_to_image (test_mouth_geometry.TestMouthGeometry.test_box_is_clamped_to_image) ... ok
+test_center_square_box (test_mouth_geometry.TestMouthGeometry.test_center_square_box) ... ok
+test_ema_smooths_towards_previous_box (test_mouth_geometry.TestMouthGeometry.test_ema_smooths_towards_previous_box) ... ok
+test_empty_points_raise (test_mouth_geometry.TestMouthGeometry.test_empty_points_raise) ... ok
+test_landmark_pixels_accepts_objects_and_dicts (test_mouth_geometry.TestMouthGeometry.test_landmark_pixels_accepts_objects_and_dicts) ... ok
+test_missing_weights_blocks (test_preflight.TestPreflightAdapter.test_missing_weights_blocks) ... ok
+test_valid_adapter (test_preflight.TestPreflightAdapter.test_valid_adapter) ... ok
+test_wrong_base_model_blocks (test_preflight.TestPreflightAdapter.test_wrong_base_model_blocks) ... ok
+test_clean_dataset_passes (test_preflight.TestPreflightDataset.test_clean_dataset_passes) ... ok
+test_main_exit_codes (test_preflight.TestPreflightDataset.test_main_exit_codes) ... 

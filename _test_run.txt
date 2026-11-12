@@ -1,0 +1,5 @@
+usage: python.exe -m unittest discover [-h] [-v] [-q] [--locals]
+                                       [--durations N] [-f] [-c] [-b]
+                                       [-k TESTNAMEPATTERNS] [-s START]
+                                       [-p PATTERN] [-t TOP]
+python.exe -m unittest discover: error: unrecognized arguments: echo ---TAIL---; powershell -Command Get-Content _test_run.txt -Tail 25
