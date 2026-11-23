@@ -283,8 +283,8 @@ def devanagari_to_phonemes(text: str, as_string: bool = False, transcript_id: st
             logger.warning(f"[Hindi G2P] Unsupported character '{ch}' in word '{word}'"
                            + (f" [transcript: {transcript_id}]" if transcript_id else ""))
 
-        # Keep Devanagari characters
-        cleaned = re.sub(r'[^\u0900-\u097F]', '', word)
+        # Keep Devanagari letters; drop Devanagari punctuation (danda, double danda, abbreviation sign)
+        cleaned = re.sub(r'[^\u0900-\u097F]|[\u0964\u0965\u0970]', '', word)
         if not cleaned:
             continue
         units = word_to_syllables(cleaned, transcript_id=transcript_id)

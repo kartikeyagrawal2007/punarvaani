@@ -48,6 +48,14 @@ class TestHindiG2PGoldenTable(unittest.TestCase):
             for token in devanagari_to_phonemes(word):
                 self.assertIn(token, vocab, f"{token} from '{word}' missing from HPI")
 
+    def test_danda_is_punctuation_not_unsupported(self):
+        clear_unsupported_char_log()
+        self.assertEqual(
+            devanagari_to_phonemes("भारत। कमल॥ ।", as_string=True, transcript_id="clip_d"),
+            devanagari_to_phonemes("भारत कमल", as_string=True),
+        )
+        self.assertEqual(get_unsupported_char_report()["total_unsupported_occurrences"], 0)
+
     def test_unsupported_characters_are_logged(self):
         clear_unsupported_char_log()
         devanagari_to_phonemes("abc 123", transcript_id="clip_7")

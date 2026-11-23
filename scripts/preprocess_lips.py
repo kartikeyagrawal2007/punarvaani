@@ -19,8 +19,10 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 try:
-    from face_cropper import FaceCropper
+    from face_cropper import FaceCropper  # noqa: E402
     HAS_FACE_CROPPER = True
 except ImportError:
     HAS_FACE_CROPPER = False

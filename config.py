@@ -4,6 +4,7 @@ except ImportError:
     import argparse as argparse_lib
 
 import csv
+import os
 import numpy as np
 
 def load_args():
@@ -25,7 +26,8 @@ def load_args():
     # parser.add_argument('--audio_root', type=str, help="Root directory of the audio dataset")
     # parser.add_argument('--file_list', type=str, help="(List of) video file paths relative to videos_root, can also be regex")
     parser.add_argument('--batch_size', type=int, default=4, help="Batch size for training (reduced for all-frames input)")
-    parser.add_argument('--num_workers', type=int, default=4, help="Number of worker threads for loading data")
+    parser.add_argument('--num_workers', type=int, default=0 if os.name == "nt" else 4,
+                        help="DataLoader worker processes (default 0 on Windows, where spawned workers crash in background runs)")
     # parser.add_argument('--whisper_model', type=str, default="base", help="Size of the whisper model to use for transcription")
 
     # Transformer configuration

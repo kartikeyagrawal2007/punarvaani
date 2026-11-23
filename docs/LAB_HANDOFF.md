@@ -152,7 +152,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 # if blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements.txt   # pins mediapipe==0.10.14; a bare `pip install mediapipe` gets a version without mp.solutions
 # NOTE: requirements.txt contains `triton` (Linux/CUDA-only). On Windows if install fails on that line, delete the `triton` line and rerun.
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 python -c "import mediapipe; print(mediapipe.__version__)"
@@ -204,9 +204,11 @@ If layout is `train/val/test` splits, preflight each split (`--min_speakers 1` f
 
 Copy 2 small speaker folders to `D:\punarvaani\hindi_dataset_micro`, then:
 ```powershell
-python main.py --mode train --data_dir D:\punarvaani\hindi_dataset_micro --val_dir D:\punarvaani\hindi_dataset_micro --save_model_path D:\punarvaani\checkpoints\stage1_micro_overfit.pth --val_split 0 --crop_mode none --max_frames 48 --batch_size 2 --eval_batch_size 2 --epochs 80 --warmup_steps 20 --temporal_upsample_factor 2 --vit_embed_dim 128 --vit_depth 2 --vit_heads 4 --spatial_pool_tokens 4x4 --device cuda
+python main.py --mode train --data_dir D:\punarvaani\hindi_dataset_micro --val_dir D:\punarvaani\hindi_dataset_micro --save_model_path D:\punarvaani\checkpoints\stage1_micro_overfit.pth --val_split 0 --crop_mode none --max_frames 48 --batch_size 2 --eval_batch_size 2 --epochs 300 --warmup_steps 20 --min_lr 1e-4 --num_workers 0 --temporal_upsample_factor 2 --vit_embed_dim 128 --vit_depth 2 --vit_heads 4 --spatial_pool_tokens 4x4 --device cuda
 ```
-Pass = loss collapses toward ~0, PER improves sharply. If not, STOP and debug data/transcripts/CTC/labels before the bigger run.
+Pass = PER well under ~30% and most clips decode exactly (2026-11-23 lab run: 7/8 exact, best val PER 9.0%). Judge by PER and decoded output: with the LR held, the CTC loss can oscillate late even while PER improves. If it fails, STOP and debug data/transcripts/CTC/labels before the bigger run.
+
+Why `--min_lr 1e-4` and 300 epochs: with 8 clips and batch 2 there are only 4 updates per epoch. The old 80-epoch recipe gave 320 updates, and the default plateau scheduler cut the LR to ~5e-8, so the model froze on the most common phonemes. Holding the LR and giving ~1,200 updates fixes it (see `docs/LAB_SMOKE_FINDINGS.md` §7).
 
 ### 7.5 Smoke train (~1h, 3 epochs, normal size)
 
