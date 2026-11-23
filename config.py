@@ -60,6 +60,8 @@ def load_args():
     parser.add_argument('--max_invalid_sample_pct', type=float, default=10.0, help="Maximum allowed percentage of invalid CTC samples per epoch")
     parser.add_argument('--eval_batch_size', type=int, default=4, help="Batch size for validation and evaluation mode")
     parser.add_argument('--warmup_steps', type=int, default=2000, help="Linear LR warmup steps before ReduceLROnPlateau")
+    parser.add_argument('--lr_patience', type=int, default=3, help="Epochs without val improvement before ReduceLROnPlateau halves the LR")
+    parser.add_argument('--min_lr', type=float, default=1e-5, help="LR floor during plateau decay (prevents collapse to ~0 on short/smoke runs)")
     parser.add_argument('--vit_embed_dim', type=int, default=768, help="Spatiotemporal ViT embedding dimension")
     parser.add_argument('--vit_depth', type=int, default=8, help="Number of ViT blocks")
     parser.add_argument('--vit_heads', type=int, default=12, help="Number of ViT attention heads")

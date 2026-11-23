@@ -309,7 +309,10 @@ def train(args, device, vocab):
         warmup_steps=args.warmup_steps,
         base_lr=0.0,
         target_lr=1e-4,
-        after_scheduler=ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3),
+        after_scheduler=ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5,
+            patience=args.lr_patience, min_lr=args.min_lr,
+        ),
     )
 
     best_val_per = float("inf")
