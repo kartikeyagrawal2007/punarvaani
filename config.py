@@ -183,6 +183,27 @@ class WarmupScheduler:
                     self.after_scheduler.step()
             self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
+    @property
+    def warming_up(self):
+        return self.current_step < self.warmup_steps
+
+    def step_batch(self):
+        """Advance the warmup by one optimizer step. Call after every optimizer.step(); no-op once warm.
+
+        Warmup is counted in batches: --warmup_steps 100 reaches the target LR after 100 updates."""
+        if self.warming_up:
+            self.step()
+
+    def step_epoch(self, loss=None):
+        """End of an epoch: give the validation loss to the plateau scheduler, but only after warmup."""
+        if self.warming_up or self.after_scheduler is None:
+            return
+        if loss is not None:
+            self.after_scheduler.step(loss)
+        else:
+            self.after_scheduler.step()
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
     def _set_lr(self, lr):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr

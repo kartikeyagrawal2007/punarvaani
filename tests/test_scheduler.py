@@ -41,6 +41,24 @@ class TestWarmupScheduler(unittest.TestCase):
         scheduler.step()
         self.assertEqual(after.calls, [0.7, None])
 
+    def test_warmup_counts_batches_and_plateau_waits_for_it(self):
+        parameter = torch.nn.Parameter(torch.zeros(1))
+        optimizer = torch.optim.SGD([parameter], lr=1.0)
+        after = RecordingScheduler()
+        scheduler = WarmupScheduler(optimizer, warmup_steps=4, base_lr=0.0, target_lr=1e-4, after_scheduler=after)
+
+        for _ in range(2):  # two batches of the first epoch
+            scheduler.step_batch()
+        scheduler.step_epoch(0.9)  # an epoch ending mid-warmup must not touch the plateau scheduler
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 5e-5)
+        self.assertEqual(after.calls, [])
+
+        for _ in range(10):  # warmup ends after 4 updates; later batches leave the LR alone
+            scheduler.step_batch()
+        self.assertAlmostEqual(optimizer.param_groups[0]["lr"], 1e-4)
+        scheduler.step_epoch(0.8)
+        self.assertEqual(after.calls, [0.8])
+
     def test_last_lr_is_reported(self):
         parameter = torch.nn.Parameter(torch.zeros(1))
         optimizer = torch.optim.SGD([parameter], lr=1.0)

@@ -132,7 +132,7 @@ def load_finetuned_model(model_path, device, num_classes, args=None, **model_kwa
 # =============================================================================
 # Training
 # =============================================================================
-def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_vocab):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_vocab, scheduler=None):
     model.train()
     running_loss = 0.0
     total_edits = 0
@@ -170,6 +170,8 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             optimizer.step()
+        if scheduler is not None:
+            scheduler.step_batch()  # warmup is counted in optimizer steps, not epochs
 
         running_loss += loss.item()
         valid_batches += 1
@@ -319,12 +321,12 @@ def train(args, device, vocab):
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_per, train_dropped = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, vocab
+            model, train_loader, optimizer, criterion, device, vocab, scheduler
         )
         val_loss, val_per, val_dropped = validate_one_epoch(
             model, val_loader, criterion, device, vocab
         )
-        scheduler.step(val_loss)
+        scheduler.step_epoch(val_loss)
         lr = scheduler.get_last_lr()[0]
 
         dropped_limit = max(1, len(train_dataset)) * args.max_invalid_sample_pct / 100.0
