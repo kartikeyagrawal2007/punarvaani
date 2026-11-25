@@ -63,6 +63,7 @@ class TestEndToEndSmoke(unittest.TestCase):
                 warmup_steps=1,
                 lr_patience=3,
                 min_lr=1e-5,
+                resume=False,
                 device="cpu",
                 language="hindi",
                 mode="train",
@@ -72,6 +73,15 @@ class TestEndToEndSmoke(unittest.TestCase):
 
             train(args, device, vocab)
             self.assertTrue(os.path.exists(checkpoint))
+            last = os.path.join(tmp, "tiny_last.pt")
+            self.assertTrue(os.path.exists(last))
+            self.assertEqual(torch.load(last, weights_only=False)["epoch"], 1)
+
+            # A restart with --resume continues at epoch 2 instead of epoch 1.
+            args.resume, args.epochs = True, 2
+            train(args, device, vocab)
+            self.assertEqual(torch.load(last, weights_only=False)["epoch"], 2)
+            args.resume, args.epochs = False, 1
 
             run_evaluation(args, device, vocab)
             result = run_inference(

@@ -66,6 +66,39 @@ class TestWarmupScheduler(unittest.TestCase):
         scheduler.step()
         self.assertAlmostEqual(scheduler.get_last_lr()[0], 0.2)
 
+    def test_state_round_trip_resumes_warmup_and_plateau(self):
+        from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+        def make():
+            parameter = torch.nn.Parameter(torch.zeros(1))
+            optimizer = torch.optim.SGD([parameter], lr=1.0)
+            after = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=1, min_lr=1e-6)
+            return optimizer, WarmupScheduler(optimizer, warmup_steps=4, base_lr=0.0, target_lr=1e-3,
+                                              after_scheduler=after)
+
+        optimizer, scheduler = make()
+        for _ in range(2):
+            scheduler.step_batch()
+        state = {"optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict()}
+
+        optimizer2, scheduler2 = make()
+        optimizer2.load_state_dict(state["optimizer"])
+        scheduler2.load_state_dict(state["scheduler"])
+        self.assertEqual(scheduler2.current_step, 2)
+        self.assertAlmostEqual(optimizer2.param_groups[0]["lr"], 5e-4)
+        self.assertAlmostEqual(scheduler2.get_last_lr()[0], 5e-4)
+        for _ in range(2):  # warmup continues where it stopped instead of starting again
+            scheduler2.step_batch()
+        self.assertAlmostEqual(optimizer2.param_groups[0]["lr"], 1e-3)
+
+        for loss in (1.0, 1.0, 1.0):  # plateau patience state survives a second round trip
+            scheduler2.step_epoch(loss)
+        optimizer3, scheduler3 = make()
+        optimizer3.load_state_dict(optimizer2.state_dict())
+        scheduler3.load_state_dict(scheduler2.state_dict())
+        self.assertEqual(scheduler3.after_scheduler.num_bad_epochs, scheduler2.after_scheduler.num_bad_epochs)
+        self.assertAlmostEqual(optimizer3.param_groups[0]["lr"], optimizer2.param_groups[0]["lr"])
+
 
 if __name__ == "__main__":
     unittest.main()

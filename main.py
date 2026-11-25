@@ -270,6 +270,18 @@ def _loader(dataset, batch_size, shuffle, args, vocab):
     )
 
 
+def last_checkpoint_path(save_path: str) -> str:
+    """Where the resumable end-of-epoch state lives: stage1_full.pth -> stage1_full_last.pt."""
+    return os.path.splitext(save_path)[0] + "_last.pt"
+
+
+def save_last_checkpoint(path: str, state: dict) -> None:
+    """Write atomically (temp file, then rename), so a shutdown mid-save never leaves a broken checkpoint."""
+    tmp = path + ".tmp"
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
 def train(args, device, vocab):
     data_dir = args.data_dir or args.videos_root
     if not data_dir:
@@ -318,8 +330,24 @@ def train(args, device, vocab):
     )
 
     best_val_per = float("inf")
+    start_epoch = 1
+    last_path = last_checkpoint_path(save_path)
+    if getattr(args, "resume", False):
+        if os.path.exists(last_path):
+            state = torch.load(last_path, map_location=device, weights_only=False)
+            model.load_state_dict(state["model"])
+            optimizer.load_state_dict(state["optimizer"])
+            scheduler.load_state_dict(state["scheduler"])
+            best_val_per = state["best_val_per"]
+            start_epoch = state["epoch"] + 1
+            print(f" Resuming from {last_path}: epoch {state['epoch']} done, best val PER {best_val_per:.1f}%, "
+                  f"LR {scheduler.get_last_lr()[0]:.2e}")
+        else:
+            print(f" --resume: no checkpoint at {last_path} yet, starting from epoch 1")
+    if start_epoch > args.epochs:
+        print(f" Already trained {start_epoch - 1} epochs (--epochs {args.epochs}); raise --epochs to continue.")
 
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         train_loss, train_per, train_dropped = train_one_epoch(
             model, train_loader, optimizer, criterion, device, vocab, scheduler
         )
@@ -350,6 +378,14 @@ def train(args, device, vocab):
             best_val_per = val_per
             torch.save(model.state_dict(), save_path)
             print(f"  --> Saved new best checkpoint to {save_path} (Val PER: {val_per:.1f}%)")
+
+        save_last_checkpoint(last_path, {
+            "epoch": epoch,
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "best_val_per": best_val_per,
+        })
 
 
 # =============================================================================

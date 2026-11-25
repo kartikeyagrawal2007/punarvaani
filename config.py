@@ -56,6 +56,8 @@ def load_args():
     parser.add_argument('--allow_unknown_speakers', action='store_true', help="Allow clips directly under data_dir (random clip split instead of speaker-disjoint)")
     parser.set_defaults(crop_face=True)
     parser.add_argument('--strict_ctc', action='store_true', help="Raise instead of warning when too many samples violate the CTC length constraint")
+    parser.add_argument('--resume', action='store_true',
+                        help="Continue training from <save_model_path>_last.pt (written after every epoch) instead of epoch 1")
 
     # Architectural parameters
     parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter")
@@ -203,6 +205,19 @@ class WarmupScheduler:
         else:
             self.after_scheduler.step()
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+    def state_dict(self):
+        return {
+            'current_step': self.current_step,
+            'last_lr': list(self._last_lr),
+            'after': self.after_scheduler.state_dict() if hasattr(self.after_scheduler, 'state_dict') else None,
+        }
+
+    def load_state_dict(self, state):
+        self.current_step = state['current_step']
+        self._last_lr = list(state['last_lr'])
+        if state.get('after') is not None and hasattr(self.after_scheduler, 'load_state_dict'):
+            self.after_scheduler.load_state_dict(state['after'])
 
     def _set_lr(self, lr):
         for param_group in self.optimizer.param_groups:

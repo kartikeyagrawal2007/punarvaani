@@ -217,6 +217,8 @@ python main.py --mode train --language hindi --data_dir $DATA --save_model_path 
 ```
 If OOM → batch 2 or 1. If dedicated held-out speaker folder exists → use `--val_dir <path> --val_split 0`. This is pipeline/health, NOT a final model.
 
+**Resuming after a shutdown.** After every epoch, training writes `<save_model_path minus .pth>_last.pt` (for example `stage1_full_last.pt`) with the model, optimizer, LR schedule, epoch and best val PER. If the PC restarts, run the same command again with `--resume` added: it prints `Resuming from ...` and continues at the next epoch. The epoch that was running when the PC went off is lost. To train longer than planned, rerun with `--resume` and a larger `--epochs`. The best model is still saved to `--save_model_path`, so eval and infer commands don't change.
+
 ### 7.6 Eval + infer
 
 ```powershell
