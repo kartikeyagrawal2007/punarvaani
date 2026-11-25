@@ -317,12 +317,13 @@ def train(args, device, vocab):
     model = ML_VALLR(**_model_kwargs(args, len(vocab))).to(device)
     criterion = nn.CTCLoss(blank=vocab["<pad>"], reduction="mean", zero_infinity=True)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    peak_lr = getattr(args, "lr", 1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=peak_lr, weight_decay=1e-4)
     scheduler = WarmupScheduler(
         optimizer,
         warmup_steps=args.warmup_steps,
         base_lr=0.0,
-        target_lr=1e-4,
+        target_lr=peak_lr,
         after_scheduler=ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5,
             patience=args.lr_patience, min_lr=args.min_lr,

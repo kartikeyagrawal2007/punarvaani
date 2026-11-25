@@ -63,6 +63,7 @@ class TestEndToEndSmoke(unittest.TestCase):
                 warmup_steps=1,
                 lr_patience=3,
                 min_lr=1e-5,
+                lr=1e-4,
                 resume=False,
                 device="cpu",
                 language="hindi",

@@ -63,6 +63,8 @@ def load_args():
     parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter")
     parser.add_argument('--max_invalid_sample_pct', type=float, default=10.0, help="Maximum allowed percentage of invalid CTC samples per epoch")
     parser.add_argument('--eval_batch_size', type=int, default=4, help="Batch size for validation and evaluation mode")
+    parser.add_argument('--lr', type=float, default=1e-4,
+                        help="Peak learning rate reached after warmup (raise it, e.g. 3e-4, if training stalls on common phonemes)")
     parser.add_argument('--warmup_steps', type=int, default=2000, help="Linear LR warmup steps before ReduceLROnPlateau")
     parser.add_argument('--lr_patience', type=int, default=3, help="Epochs without val improvement before ReduceLROnPlateau halves the LR")
     parser.add_argument('--min_lr', type=float, default=1e-5, help="LR floor during plateau decay (prevents collapse to ~0 on short/smoke runs)")

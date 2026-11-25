@@ -217,6 +217,8 @@ python main.py --mode train --language hindi --data_dir $DATA --save_model_path 
 ```
 If OOM → batch 2 or 1. If dedicated held-out speaker folder exists → use `--val_dir <path> --val_split 0`. This is pipeline/health, NOT a final model.
 
+**If training stalls** (train loss flat around 2.9-3.0 and train PER stuck near 77% for several epochs, while val PER swings), the model is stuck predicting the most common phonemes. A lower LR keeps it there; a higher one gets it out (see `docs/LAB_SMOKE_FINDINGS.md`). Start a fresh run with `--lr 3e-4 --min_lr 1e-4 --lr_patience 5` and a new `--save_model_path`, so the LR never drops below 1e-4 while it is still stuck.
+
 **Resuming after a shutdown.** After every epoch, training writes `<save_model_path minus .pth>_last.pt` (for example `stage1_full_last.pt`) with the model, optimizer, LR schedule, epoch and best val PER. If the PC restarts, run the same command again with `--resume` added: it prints `Resuming from ...` and continues at the next epoch. The epoch that was running when the PC went off is lost. To train longer than planned, rerun with `--resume` and a larger `--epochs`. The best model is still saved to `--save_model_path`, so eval and infer commands don't change.
 
 ### 7.6 Eval + infer
