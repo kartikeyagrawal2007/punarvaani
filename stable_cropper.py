@@ -45,6 +45,13 @@ class StableMouthCropper:
         self.window = window
         self.side_scale = side_scale
         self.face_margin = face_margin
+        self._models = None  # (detector, mesh), loaded on first use and reused: both keep no per-clip state
+
+    def close(self):
+        if self._models is not None:
+            for model in self._models:
+                model.close()
+            self._models = None
 
     def _landmarks(self, frame, detector, mesh):
         """FaceMesh landmarks of the largest face as an (468, 2) array in full-frame pixels, or None."""
@@ -81,27 +88,25 @@ class StableMouthCropper:
         """RGB frames -> RGB mouth crops (frame_size x frame_size), or None when the face is lost too often."""
         if not len(frames_rgb):
             return None
-        centers, widths, rolls, valid = [], [], [], []
-        detector, mesh = self._detector_factory(), self._mesh_factory()
-        try:
-            for frame in frames_rgb:
-                points = self._landmarks(frame, detector, mesh)
-                if points is not None:
-                    c, mw, r = self._measure(points)
-                    centers.append(c)
-                    widths.append(mw)
-                    rolls.append(r)
-                    valid.append(True)
-                else:
-                    centers.append((0.0, 0.0))
-                    widths.append(0.0)
-                    rolls.append(0.0)
-                    valid.append(False)
-        finally:
-            detector.close()
-            mesh.close()
+        centers, eye_dists, rolls, valid = [], [], [], []
+        if self._models is None:
+            self._models = (self._detector_factory(), self._mesh_factory())
+        detector, mesh = self._models
+        for frame in frames_rgb:
+            points = self._landmarks(frame, detector, mesh)
+            if points is not None:
+                c, ed, r = self._measure(points)
+                centers.append(c)
+                eye_dists.append(ed)
+                rolls.append(r)
+                valid.append(True)
+            else:
+                centers.append((0.0, 0.0))
+                eye_dists.append(0.0)
+                rolls.append(0.0)
+                valid.append(False)
 
-        track = stable_crop_track(centers, widths, rolls, valid, window=self.window, side_scale=self.side_scale)
+        track = stable_crop_track(centers, eye_dists, rolls, valid, window=self.window, side_scale=self.side_scale)
         if track is None:
             return None
         cx, cy, roll, side = track
