@@ -52,8 +52,20 @@ def preprocess_dataset(
     frame_stride: int = 1,
     fps: float = 0.0,
     cropper=None,
+    crop_method: str = "stable",
+    skip_existing: bool = False,
 ) -> dict:
-    """Crop mouth ROIs for every video/transcript pair under ``input_dir``."""
+    """Crop mouth ROIs for every video/transcript pair under ``input_dir``.
+
+    ``crop_method="stable"`` (default) crops whole clips with StableMouthCropper: one coordinate system,
+    crop size from the eye distance, smoothed over time. ``"legacy"`` is the old per-frame FaceCropper,
+    whose crop zooms with the lip height."""
+    if cropper is None and crop_method == "stable":
+        try:
+            from stable_cropper import StableMouthCropper
+        except ImportError as exc:
+            raise RuntimeError(f"The stable cropper needs mediapipe: {exc}") from exc
+        cropper = StableMouthCropper()
     if cropper is None:
         if not HAS_FACE_CROPPER:
             raise RuntimeError(
@@ -100,6 +112,9 @@ def preprocess_dataset(
         target_dir = os.path.join(output_dir, relative_dir) if relative_dir else output_dir
         os.makedirs(target_dir, exist_ok=True)
         out_video = os.path.join(target_dir, f"{base_name}.mp4")
+        if skip_existing and os.path.exists(out_video) and os.path.getsize(out_video) > 0:
+            report["successful_crops"] += 1
+            continue
 
         # Copy the matching transcript into the same relative location.
         txt_path = os.path.splitext(video_path)[0] + ".txt"
@@ -132,25 +147,35 @@ def preprocess_dataset(
             report["failed_videos"].append({"video": video_path, "reason": "no frames selected"})
             continue
 
-        if hasattr(cropper, "reset"):
-            cropper.reset()
-
         cropped = []
         failure = None
-        for idx in indices:
-            rgb = cv2.cvtColor(frames[int(idx)], cv2.COLOR_BGR2RGB)
-            crop = cropper.crop_mouth(rgb, frame_size=(frame_size, frame_size))
-            if crop is None or getattr(crop, "size", 0) == 0:
-                failure = "mouth crop failed"
-                break
-            cropped.append(cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
+        if hasattr(cropper, "crop_clip"):  # whole-clip cropper: sees every frame before cutting any
+            rgb_frames = [cv2.cvtColor(frames[int(idx)], cv2.COLOR_BGR2RGB) for idx in indices]
+            crops = cropper.crop_clip(rgb_frames, frame_size)
+            if crops is None:
+                failure = "face not found in enough frames"
+            else:
+                cropped = [cv2.cvtColor(crop, cv2.COLOR_RGB2BGR) for crop in crops]
+        else:
+            if hasattr(cropper, "reset"):
+                cropper.reset()
+            for idx in indices:
+                rgb = cv2.cvtColor(frames[int(idx)], cv2.COLOR_BGR2RGB)
+                crop = cropper.crop_mouth(rgb, frame_size=(frame_size, frame_size))
+                if crop is None or getattr(crop, "size", 0) == 0:
+                    failure = "mouth crop failed"
+                    break
+                cropped.append(cv2.cvtColor(crop, cv2.COLOR_RGB2BGR))
 
         if failure is not None or not cropped:
             report["failed_videos"].append({"video": video_path, "reason": failure or "no crops"})
             continue
 
+        # Write to a temporary name and rename at the end, so an interrupted run never leaves a
+        # half-written clip that --skip_existing would mistake for a finished one.
+        part_video = os.path.join(target_dir, f"{base_name}.part.mp4")
         writer = cv2.VideoWriter(
-            out_video,
+            part_video,
             cv2.VideoWriter_fourcc(*"mp4v"),
             float(output_fps),
             (frame_size, frame_size),
@@ -163,6 +188,7 @@ def preprocess_dataset(
                 writer.write(frame)
         finally:
             writer.release()
+        os.replace(part_video, out_video)
 
         report["successful_crops"] += 1
 
@@ -194,6 +220,11 @@ def main(argv=None):
     parser.add_argument("--frame_stride", type=int, default=1, help="Read every Nth frame")
     parser.add_argument("--frame_size", type=int, default=224, help="Output resolution (H=W)")
     parser.add_argument("--fps", type=float, default=0.0, help="Output frame rate; 0 = preserve source FPS")
+    parser.add_argument("--crop_method", choices=["stable", "legacy"], default="stable",
+                        help="stable: steady whole-clip crops sized by eye distance (default); "
+                             "legacy: the old per-frame crops that zoom with the lip height")
+    parser.add_argument("--skip_existing", action="store_true",
+                        help="Skip clips whose cropped .mp4 already exists (to continue an interrupted run)")
     args = parser.parse_args(argv)
 
     try:
@@ -205,6 +236,8 @@ def main(argv=None):
             max_frames=args.max_frames,
             frame_stride=args.frame_stride,
             fps=args.fps,
+            crop_method=args.crop_method,
+            skip_existing=args.skip_existing,
         )
     except RuntimeError as exc:
         print(f"[Error] {exc}")

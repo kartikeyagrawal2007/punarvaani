@@ -32,6 +32,20 @@ class FakeCropper:
         return cv2.resize(image, size)
 
 
+class FakeClipCropper:
+    """Whole-clip cropper like StableMouthCropper; fails clips with fewer than ``min_frames`` frames."""
+
+    def __init__(self, min_frames=0):
+        self.min_frames = min_frames
+        self.clips = 0
+
+    def crop_clip(self, frames, frame_size=224):
+        self.clips += 1
+        if len(frames) < self.min_frames:
+            return None
+        return [cv2.resize(f, (frame_size, frame_size)) for f in frames]
+
+
 class TestPreprocessLips(unittest.TestCase):
     def setUp(self):
         self.input_dir = tempfile.mkdtemp(prefix="vallr_pre_in_")
@@ -83,6 +97,24 @@ class TestPreprocessLips(unittest.TestCase):
         self.assertEqual(report["successful_crops"], 0)
         self.assertEqual(len(report["failed_videos"]), 2)
         self.assertTrue(all("mouth crop failed" in item["reason"] for item in report["failed_videos"]))
+
+
+    def test_whole_clip_cropper_and_skip_existing(self):
+        cropper = FakeClipCropper()
+        report = preprocess_dataset(self.input_dir, self.output_dir, max_frames=4, frame_size=32, cropper=cropper)
+        self.assertEqual((report["successful_crops"], cropper.clips), (2, 2))
+        again = FakeClipCropper()
+        report = preprocess_dataset(self.input_dir, self.output_dir, max_frames=4, frame_size=32, cropper=again,
+                                    skip_existing=True)
+        self.assertEqual((report["successful_crops"], again.clips), (2, 0))  # nothing re-cropped
+        leftovers = [n for _, _, fs in os.walk(self.output_dir) for n in fs if ".part." in n]
+        self.assertEqual(leftovers, [])
+
+    def test_whole_clip_failure_is_reported(self):
+        report = preprocess_dataset(self.input_dir, self.output_dir, max_frames=4, frame_size=32,
+                                    cropper=FakeClipCropper(min_frames=99))
+        self.assertEqual(report["successful_crops"], 0)
+        self.assertEqual(report["failed_videos"][0]["reason"], "face not found in enough frames")
 
 
 if __name__ == "__main__":
