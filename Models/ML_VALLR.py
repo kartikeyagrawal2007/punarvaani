@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+import math
 from typing import Tuple, Optional
 
 # =============================
@@ -315,6 +316,122 @@ class TemporalAdapter(nn.Module):
         return h  # (B, adapter_dim, Tp * upsample_factor)
 
 
+# ==========================================
+# 3D-CNN + ResNet-18 lip front end
+# ==========================================
+
+class _BasicBlock(nn.Module):
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 1):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_ch, out_ch, 3, stride, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_ch)
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, 1, 1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_ch)
+        self.down = None
+        if stride != 1 or in_ch != out_ch:
+            self.down = nn.Sequential(nn.Conv2d(in_ch, out_ch, 1, stride, bias=False), nn.BatchNorm2d(out_ch))
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = self.bn2(self.conv2(out))
+        return F.relu(out + (x if self.down is None else self.down(x)), inplace=True)
+
+
+class LipResNetFrontend(nn.Module):
+    """
+    The standard lip-reading front end: one 3D convolution over 5 frames, then a 2D ResNet-18 per frame.
+    CNNs already know about edges and local shapes, so they learn lip shapes from far less data than a ViT.
+
+    Input  : (B, C, T, H, W) RGB in [0, 1] (any H, W; usually 224 mouth crops)
+    Output : (B, T, 512) one feature vector per frame (padded frames are zero)
+
+    Frames are turned grey, resized to 96x96 and cropped to 88x88: a random crop plus a random horizontal
+    flip per clip during training, the centre crop otherwise. Batch norm only ever sees real frames, so
+    padding never changes a clip's features.
+    """
+    RESIZE = 96
+    CROP = 88
+    MEAN = 0.421
+    STD = 0.165
+
+    def __init__(self):
+        super().__init__()
+        self.stem = nn.Conv3d(1, 64, kernel_size=(5, 7, 7), stride=(1, 2, 2), padding=(2, 3, 3), bias=False)
+        self.stem_bn = nn.BatchNorm2d(64)
+        layers, in_ch = [], 64
+        for out_ch, stride in ((64, 1), (128, 2), (256, 2), (512, 2)):
+            layers += [_BasicBlock(in_ch, out_ch, stride), _BasicBlock(out_ch, out_ch, 1)]
+            in_ch = out_ch
+        self.trunk = nn.Sequential(*layers)
+        self.out_dim = 512
+
+    def _prepare(self, x: torch.Tensor, frame_valid: torch.Tensor) -> torch.Tensor:
+        B, C, T, H, W = x.shape
+        if C == 3:
+            weights = x.new_tensor([0.299, 0.587, 0.114]).view(1, 3, 1, 1, 1)
+            x = (x * weights).sum(dim=1, keepdim=True)
+        elif C != 1:
+            x = x.mean(dim=1, keepdim=True)
+        frames = x.permute(0, 2, 1, 3, 4).reshape(B * T, 1, H, W)
+        if (H, W) != (self.RESIZE, self.RESIZE):
+            frames = F.interpolate(frames, size=(self.RESIZE, self.RESIZE), mode="bilinear",
+                                   align_corners=False, antialias=True)
+        frames = frames.view(B, T, 1, self.RESIZE, self.RESIZE)
+
+        margin = self.RESIZE - self.CROP
+        if self.training:
+            crops = []
+            for b in range(B):  # one random crop and flip per clip, the same for all its frames
+                top, left = (int(v) for v in torch.randint(0, margin + 1, (2,)))
+                clip = frames[b, :, :, top:top + self.CROP, left:left + self.CROP]
+                if torch.rand(()) < 0.5:
+                    clip = clip.flip(-1)
+                crops.append(clip)
+            frames = torch.stack(crops)
+        else:
+            m = margin // 2
+            frames = frames[:, :, :, m:m + self.CROP, m:m + self.CROP]
+
+        frames = (frames - self.MEAN) / self.STD
+        frames = frames * frame_valid.view(B, T, 1, 1, 1).to(frames.dtype)  # padded frames = 0, like conv padding
+        return frames.permute(0, 2, 1, 3, 4)  # (B, 1, T, 88, 88)
+
+    def forward(self, x: torch.Tensor, frame_valid: torch.Tensor) -> torch.Tensor:
+        B, _, T = x.shape[:3]
+        x = self.stem(self._prepare(x, frame_valid))     # (B, 64, T, 44, 44)
+        x = x.permute(0, 2, 1, 3, 4)                      # (B, T, 64, 44, 44)
+        valid = frame_valid.reshape(-1)
+        real = x.reshape(B * T, *x.shape[2:])[valid]      # batch norm sees real frames only
+        real = F.relu(self.stem_bn(real), inplace=True)
+        real = F.max_pool2d(real, kernel_size=3, stride=2, padding=1)
+        real = self.trunk(real)
+        real = real.mean(dim=(2, 3))                      # (N_real, 512)
+        out = real.new_zeros(B * T, self.out_dim)
+        out[valid] = real
+        return out.view(B, T, self.out_dim)
+
+
+def sinusoidal_positions(length: int, dim: int, device, dtype) -> torch.Tensor:
+    position = torch.arange(length, device=device, dtype=torch.float32).unsqueeze(1)
+    div = torch.exp(torch.arange(0, dim, 2, device=device, dtype=torch.float32) * (-math.log(10000.0) / dim))
+    pe = torch.zeros(length, dim, device=device, dtype=torch.float32)
+    pe[:, 0::2] = torch.sin(position * div)
+    pe[:, 1::2] = torch.cos(position * div)
+    return pe.to(dtype)
+
+
+def stage1_kwargs_from_state_dict(state_dict: dict) -> dict:
+    """Architecture settings that can be read off saved weights, so eval/infer rebuild the right model."""
+    if not any(k.startswith("frontend.") for k in state_dict):
+        return {"frontend": "vit"}
+    layers = {int(k.split(".")[2]) for k in state_dict if k.startswith("backend.layers.")}
+    return {
+        "frontend": "resnet",
+        "backend_dim": int(state_dict["frontend_proj.weight"].shape[0]),
+        "backend_layers": len(layers),
+    }
+
+
 # ============================
 # VALLR model (pure PyTorch)
 # ============================
@@ -348,13 +465,46 @@ class VALLR(nn.Module):
         vit_attn_dropout: float = 0.0,
         vit_mask_ratio: float = 0.0,  # 0.0 default for supervised mode
         spatial_pool_tokens: Optional[Tuple[int, int]] = None,
+
+        # "vit" (spatiotemporal ViT above) or "resnet" (3D-CNN + ResNet-18 + temporal transformer)
+        frontend: str = "vit",
+        backend_dim: int = 256,
+        backend_layers: int = 6,
+        backend_dropout: float = 0.1,
     ):
         super().__init__()
+        if frontend not in ("vit", "resnet"):
+            raise ValueError(f"frontend must be 'vit' or 'resnet', got {frontend!r}")
+        self.frontend_type = frontend
         self.temporal_upsample_factor = temporal_upsample_factor
         self.patch_size = patch_size
         self.tubelet_size = tubelet_size
         self.img_size = img_size
         self.spatial_pool_tokens = spatial_pool_tokens
+
+        if frontend == "resnet":
+            if temporal_upsample_factor % tubelet_size != 0:
+                raise ValueError("--temporal_upsample_factor must be a multiple of the tubelet size (2) for the resnet front end")
+            # Per-frame features, so the adapter upsamples by factor/tubelet to keep the same CTC length
+            # (ceil(frames / tubelet) * factor) that the dataset and collate already assume.
+            self.frontend = LipResNetFrontend()
+            self.frontend_proj = nn.Linear(self.frontend.out_dim, backend_dim)
+            layer = nn.TransformerEncoderLayer(
+                d_model=backend_dim, nhead=max(1, backend_dim // 64), dim_feedforward=4 * backend_dim,
+                dropout=backend_dropout, activation="gelu", batch_first=True, norm_first=True,
+            )
+            self.backend = nn.TransformerEncoder(layer, num_layers=backend_layers, enable_nested_tensor=False)
+            self.backend_norm = nn.LayerNorm(backend_dim)
+            self.temporal_adapter = TemporalAdapter(
+                in_channels=backend_dim, adapter_dim=adapter_dim,
+                upsample_factor=temporal_upsample_factor // tubelet_size,
+            )
+            self.adapter = nn.Sequential(nn.Linear(adapter_dim, ctc_hidden_size), nn.ReLU(inplace=True))
+            self.ctc_head = nn.Linear(ctc_hidden_size, num_classes)
+            # Kaiming init for the CNN parts; the transformer and CTC head keep PyTorch's default init.
+            for part in (self.frontend, self.temporal_adapter, self.adapter):
+                part.apply(self._init_weights)
+            return
 
         # 1) Spatiotemporal ViT backbone producing tokens (B, N, D)
         self.backbone = VideoViTMasked(
@@ -404,7 +554,7 @@ class VALLR(nn.Module):
             init.kaiming_uniform_(module.weight, nonlinearity='relu')
             if module.bias is not None:
                 init.zeros_(module.bias)
-        elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
+        elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
             init.ones_(module.weight)
             init.zeros_(module.bias)
         elif isinstance(module, nn.LayerNorm):
@@ -452,6 +602,9 @@ class VALLR(nn.Module):
             pad = self.tubelet_size - (T % self.tubelet_size)
             vid = F.pad(vid, (0, 0, 0, 0, 0, pad))
             T += pad
+
+        if self.frontend_type == "resnet":
+            return self._forward_resnet(vid, video_lengths)
 
         Tp = T // self.tubelet_size
         Hp = H // self.patch_size
@@ -506,6 +659,35 @@ class VALLR(nn.Module):
         logits = self.ctc_head(adapted)                # (B, T_ctc, num_classes)
 
         return logits, adapted
+
+    def _forward_resnet(self, vid: torch.Tensor, video_lengths: Optional[torch.Tensor]):
+        B, _, T = vid.shape[:3]  # T is already a tubelet multiple
+        device = vid.device
+        if video_lengths is None:
+            frames = torch.full((B,), T, device=device, dtype=torch.long)
+        else:
+            frames = video_lengths.to(device=device, dtype=torch.long).clamp(min=1, max=T)
+        # Count whole tubelets, as the CTC length formula does (an odd last frame rounds up).
+        valid_tubelets = torch.div(frames + self.tubelet_size - 1, self.tubelet_size, rounding_mode="floor")
+        valid_frames = (valid_tubelets * self.tubelet_size).clamp(max=T)
+        real_frames = torch.arange(T, device=device).unsqueeze(0) < frames.unsqueeze(1)    # pixels to read
+        step_frames = torch.arange(T, device=device).unsqueeze(0) < valid_frames.unsqueeze(1)  # steps to keep
+
+        feats = self.frontend(vid, real_frames)                       # (B, T, 512)
+        h = self.frontend_proj(feats)
+        h = h + sinusoidal_positions(T, h.size(-1), device, h.dtype).unsqueeze(0)
+        h = h * step_frames.unsqueeze(-1).to(h.dtype)
+        h = self.backend(h, src_key_padding_mask=~step_frames)
+        h = self.backend_norm(h) * step_frames.unsqueeze(-1).to(h.dtype)
+
+        adapted_temp = self.temporal_adapter(h.transpose(1, 2), valid_lengths=valid_frames)  # (B, A, T*up)
+        adapted_temp = adapted_temp.transpose(1, 2)
+        t_ctc = adapted_temp.size(1)
+        valid_steps = torch.clamp(valid_tubelets * self.temporal_upsample_factor, max=t_ctc)
+        step_mask = torch.arange(t_ctc, device=device).unsqueeze(0) < valid_steps.unsqueeze(1)
+        adapted_temp = adapted_temp * step_mask.unsqueeze(-1).to(adapted_temp.dtype)
+        adapted = self.adapter(adapted_temp)
+        return self.ctc_head(adapted), adapted
 
     @staticmethod
     def decode_ctc(logits: torch.Tensor, vocab: dict, blank_id: int = 0):

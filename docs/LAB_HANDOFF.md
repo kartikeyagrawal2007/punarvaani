@@ -219,6 +219,12 @@ If OOM → batch 2 or 1. If dedicated held-out speaker folder exists → use `--
 
 **If training stalls** (train loss flat around 2.9-3.0 and train PER stuck near 77% for several epochs, while val PER swings), the model is stuck predicting the most common phonemes. A lower LR keeps it there; a higher one gets it out (see `docs/LAB_SMOKE_FINDINGS.md`). Start a fresh run with `--lr 3e-4 --min_lr 1e-4 --lr_patience 5` and a new `--save_model_path`, so the LR never drops below 1e-4 while it is still stuck.
 
+**ResNet front end (recommended for training from scratch).** `--frontend resnet` swaps the ViT for the standard lip-reading encoder: a 3D convolution over 5 frames, a ResNet-18 per frame on 88x88 grey mouth crops (random crop and flip while training), then a 6-layer temporal transformer. On the 17-hour corpus the ViT stalled at a train loss of about 2.95 (train PER about 77-80%) with any learning rate; on a 6-clip memorisation check the ResNet front end reached 0% PER in 100 steps where the ViT was still at 26% after 250. Combine it with `--curriculum_epochs 3` (epoch 1 trains on the shortest third of the clips, growing to all clips by epoch 4). It needs far less GPU memory than the ViT, so use batch 16 (drop to 8 if CUDA runs out of memory):
+```powershell
+python main.py --mode train --language hindi --data_dir E:\punarvaani_data\full_cropped\train --val_dir E:\punarvaani_data\full_cropped\val --val_split 0 --save_model_path E:\punarvaani_data\checkpoints\stage1_resnet.pth --crop_mode none --max_frames 96 --frontend resnet --curriculum_epochs 3 --batch_size 16 --eval_batch_size 16 --epochs 30 --lr 3e-4 --min_lr 1e-4 --lr_patience 5 --warmup_steps 1000 --strict_ctc --device cuda --resume
+```
+Eval and infer read the architecture from the checkpoint, so their commands stay the same. Resume needs the same `--frontend resnet` flag.
+
 **Resuming after a shutdown.** After every epoch, training writes `<save_model_path minus .pth>_last.pt` (for example `stage1_full_last.pt`) with the model, optimizer, LR schedule, epoch and best val PER. If the PC restarts, run the same command again with `--resume` added: it prints `Resuming from ...` and continues at the next epoch. The epoch that was running when the PC went off is lost. To train longer than planned, rerun with `--resume` and a larger `--epochs`. The best model is still saved to `--save_model_path`, so eval and infer commands don't change.
 
 ### 7.6 Eval + infer

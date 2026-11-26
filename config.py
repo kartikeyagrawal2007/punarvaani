@@ -63,6 +63,14 @@ def load_args():
     parser.add_argument('--temporal_upsample_factor', type=int, default=4, help="Learned temporal upsampling factor in TemporalAdapter")
     parser.add_argument('--max_invalid_sample_pct', type=float, default=10.0, help="Maximum allowed percentage of invalid CTC samples per epoch")
     parser.add_argument('--eval_batch_size', type=int, default=4, help="Batch size for validation and evaluation mode")
+    parser.add_argument('--frontend', type=str, default='vit', choices=['vit', 'resnet'],
+                        help="Stage-1 video encoder: 'vit' (spatiotemporal ViT) or 'resnet' (3D-CNN + ResNet-18 + "
+                             "temporal transformer, the standard lip-reading front end; learns from far less data)")
+    parser.add_argument('--backend_dim', type=int, default=256, help="Temporal transformer width (resnet front end)")
+    parser.add_argument('--backend_layers', type=int, default=6, help="Temporal transformer layers (resnet front end)")
+    parser.add_argument('--curriculum_epochs', type=int, default=0,
+                        help="Start on short clips: epoch 1 trains on the shortest third (by phoneme count), "
+                             "growing to all clips after this many epochs. 0 = off")
     parser.add_argument('--lr', type=float, default=1e-4,
                         help="Peak learning rate reached after warmup (raise it, e.g. 3e-4, if training stalls on common phonemes)")
     parser.add_argument('--warmup_steps', type=int, default=2000, help="Linear LR warmup steps before ReduceLROnPlateau")

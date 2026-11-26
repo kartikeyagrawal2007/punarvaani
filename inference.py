@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Tuple
 
 import torch
 
-from Models.ML_VALLR import ML_VALLR
+from Models.ML_VALLR import ML_VALLR, stage1_kwargs_from_state_dict
 from Models.Sarvam import HindiPhonemeTranslator
 from config import get_hindi_vocab
 
@@ -147,6 +147,12 @@ def transcribe_video(
 
     # Step 2: Stage 1 Visual-to-Phoneme Model
     try:
+        state_dict = None
+        if stage1_model_path and os.path.exists(stage1_model_path):
+            try:
+                state_dict = torch.load(stage1_model_path, map_location=dev, weights_only=True)
+            except TypeError:
+                state_dict = torch.load(stage1_model_path, map_location=dev)
         stage1_model = ML_VALLR(
             adapter_dim=256,
             num_classes=len(vocab),
@@ -155,12 +161,9 @@ def transcribe_video(
             vit_depth=vit_depth,
             vit_heads=vit_heads,
             spatial_pool_tokens=spatial_pool_tokens,
+            **(stage1_kwargs_from_state_dict(state_dict) if state_dict is not None else {}),
         )
-        if stage1_model_path and os.path.exists(stage1_model_path):
-            try:
-                state_dict = torch.load(stage1_model_path, map_location=dev, weights_only=True)
-            except TypeError:
-                state_dict = torch.load(stage1_model_path, map_location=dev)
+        if state_dict is not None:
             stage1_model.load_state_dict(state_dict)
             result["stage1_status"] = "ok"
         else:

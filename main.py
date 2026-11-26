@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from Data.dataset import HindiVideoDataset, VSRBatch, custom_collate
 from Data.metrics import corpus_cer_wer, levenshtein_distance
-from Models.ML_VALLR import ML_VALLR
+from Models.ML_VALLR import ML_VALLR, stage1_kwargs_from_state_dict
 from Models.Sarvam import HindiPhonemeTranslator
 from config import (
     get_hindi_vocab,
@@ -50,6 +50,9 @@ def _model_kwargs(args, num_classes: int):
         vit_depth=args.vit_depth,
         vit_heads=args.vit_heads,
         spatial_pool_tokens=parse_spatial_pool_tokens(args.spatial_pool_tokens),
+        frontend=getattr(args, "frontend", "vit"),
+        backend_dim=getattr(args, "backend_dim", 256),
+        backend_layers=getattr(args, "backend_layers", 6),
     )
 
 
@@ -116,9 +119,12 @@ def load_finetuned_model(model_path, device, num_classes, args=None, **model_kwa
             **model_kwargs,
         )
 
-    model = ML_VALLR(**kwargs)
+    state_dict = None
     if model_path and os.path.exists(model_path):
         state_dict = _load_state_dict(model_path, device)
+        kwargs.update(stage1_kwargs_from_state_dict(state_dict))  # a resnet checkpoint rebuilds a resnet model
+    model = ML_VALLR(**kwargs)
+    if state_dict is not None:
         model.load_state_dict(state_dict)
         print(f"[Stage 1] Successfully loaded model weights from {model_path}")
     else:
@@ -270,6 +276,18 @@ def _loader(dataset, batch_size, shuffle, args, vocab):
     )
 
 
+def curriculum_indices(dataset, epoch: int, curriculum_epochs: int):
+    """Indices of the clips to train on this epoch, or None for all of them.
+
+    Epoch 1 uses the shortest third of the clips (by phoneme count); the share grows linearly and reaches
+    every clip after ``curriculum_epochs`` epochs. CTC learns alignment far more easily on short clips."""
+    if curriculum_epochs <= 0 or epoch > curriculum_epochs:
+        return None
+    frac = 1.0 / 3.0 + (2.0 / 3.0) * (epoch - 1) / curriculum_epochs
+    order = sorted(range(len(dataset.samples)), key=lambda i: (len(dataset.samples[i]["label"]), i))
+    return order[: max(1, int(round(len(order) * frac)))]
+
+
 def last_checkpoint_path(save_path: str) -> str:
     """Where the resumable end-of-epoch state lives: stage1_full.pth -> stage1_full_last.pt."""
     return os.path.splitext(save_path)[0] + "_last.pt"
@@ -299,6 +317,7 @@ def train(args, device, vocab):
     print(f" Target Classes: {len(vocab)} phonemes")
     print(f" Frames: {'all up to ' + str(args.max_frames) if not args.num_frames else args.num_frames}")
     print(f" Crop mode: {resolve_crop_mode(args)}")
+    print(f" Video encoder: {getattr(args, 'frontend', 'vit')}")
     print(f" Checkpoint Target: {save_path}")
     print("==========================================\n")
 
@@ -349,8 +368,14 @@ def train(args, device, vocab):
         print(f" Already trained {start_epoch - 1} epochs (--epochs {args.epochs}); raise --epochs to continue.")
 
     for epoch in range(start_epoch, args.epochs + 1):
+        keep = curriculum_indices(train_dataset, epoch, getattr(args, "curriculum_epochs", 0))
+        epoch_loader = train_loader
+        if keep is not None:
+            epoch_loader = _loader(Subset(train_dataset, keep), args.batch_size, True, args, vocab)
+            print(f" Curriculum: epoch {epoch} trains on the {len(keep)} shortest clips "
+                  f"({100.0 * len(keep) / len(train_dataset):.0f}%)")
         train_loss, train_per, train_dropped = train_one_epoch(
-            model, train_loader, optimizer, criterion, device, vocab, scheduler
+            model, epoch_loader, optimizer, criterion, device, vocab, scheduler
         )
         val_loss, val_per, val_dropped = validate_one_epoch(
             model, val_loader, criterion, device, vocab
