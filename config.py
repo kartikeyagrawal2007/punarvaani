@@ -56,6 +56,10 @@ def load_args():
     parser.add_argument('--allow_unknown_speakers', action='store_true', help="Allow clips directly under data_dir (random clip split instead of speaker-disjoint)")
     parser.set_defaults(crop_face=True)
     parser.add_argument('--strict_ctc', action='store_true', help="Raise instead of warning when too many samples violate the CTC length constraint")
+    parser.add_argument('--init_from', type=str, default=None,
+                        help="Start a NEW run from these Stage-1 weights (a .pth best model or a _last.pt), e.g. a "
+                             "model that already got past the CTC plateau on a small subset. Ignored when --resume "
+                             "finds this run's own _last.pt")
     parser.add_argument('--resume', action='store_true',
                         help="Continue training from <save_model_path>_last.pt (written after every epoch) instead of epoch 1")
 

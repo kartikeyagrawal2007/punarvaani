@@ -65,6 +65,7 @@ class TestEndToEndSmoke(unittest.TestCase):
                 min_lr=1e-5,
                 lr=1e-4,
                 resume=False,
+                init_from=None,
                 device="cpu",
                 language="hindi",
                 mode="train",
@@ -83,6 +84,12 @@ class TestEndToEndSmoke(unittest.TestCase):
             train(args, device, vocab)
             self.assertEqual(torch.load(last, weights_only=False)["epoch"], 2)
             args.resume, args.epochs = False, 1
+
+            # --init_from starts a new run from earlier weights.
+            args.init_from, args.save_model_path = checkpoint, os.path.join(tmp, "warm.pth")
+            train(args, device, vocab)
+            self.assertTrue(os.path.exists(os.path.join(tmp, "warm_last.pt")))
+            args.init_from, args.save_model_path = None, checkpoint
 
             run_evaluation(args, device, vocab)
             result = run_inference(

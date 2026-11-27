@@ -227,6 +227,8 @@ python main.py --mode train --language hindi --data_dir E:\punarvaani_data\full_
 ```
 Eval and infer read the architecture from the checkpoint, so their commands stay the same. Resume needs the same `--frontend resnet` flag.
 
+**Getting past the CTC plateau.** Every model first sits at a train loss of about 2.9-3.0 (it outputs the common phonemes) until it learns when each sound happens. On the full 17-hour corpus no run left that stage in 30 epochs, but on 207 clips (`--sample_size 0.01`, same clips as val, 150 epochs, `--min_lr 3e-4 --warmup_steps 50`) the ResNet front end broke through around epoch 60-75 and memorised them (val PER 4.7%, 2026-11-27). `--init_from <that checkpoint>` starts a new full run from those weights, with a fresh optimizer and LR schedule.
+
 **Resuming after a shutdown.** After every epoch, training writes `<save_model_path minus .pth>_last.pt` (for example `stage1_full_last.pt`) with the model, optimizer, LR schedule, epoch and best val PER. If the PC restarts, run the same command again with `--resume` added: it prints `Resuming from ...` and continues at the next epoch. The epoch that was running when the PC went off is lost. To train longer than planned, rerun with `--resume` and a larger `--epochs`. The best model is still saved to `--save_model_path`, so eval and infer commands don't change.
 
 ### 7.6 Eval + infer

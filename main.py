@@ -364,6 +364,14 @@ def train(args, device, vocab):
                   f"LR {scheduler.get_last_lr()[0]:.2e}")
         else:
             print(f" --resume: no checkpoint at {last_path} yet, starting from epoch 1")
+    init_from = getattr(args, "init_from", None)
+    if init_from and start_epoch == 1:
+        if not os.path.exists(init_from):
+            raise FileNotFoundError(f"--init_from: no file at {init_from}")
+        weights = torch.load(init_from, map_location=device, weights_only=False)
+        weights = weights.get("model", weights) if isinstance(weights, dict) else weights
+        model.load_state_dict(weights)
+        print(f" Starting from the weights in {init_from} (new optimizer and LR schedule)")
     if start_epoch > args.epochs:
         print(f" Already trained {start_epoch - 1} epochs (--epochs {args.epochs}); raise --epochs to continue.")
 
