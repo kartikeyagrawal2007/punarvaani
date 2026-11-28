@@ -411,6 +411,19 @@ class LipResNetFrontend(nn.Module):
         return out.view(B, T, self.out_dim)
 
 
+class AudioFrameFrontend(nn.Module):
+    """Per-frame audio features (B, T, 320: four 10 ms log-mel frames per video frame) -> (B, T, 512).
+    Used by the audio-only model, which tests whether the labels can be learned from the clips' sound."""
+
+    def __init__(self, in_dim: int = 320, out_dim: int = 512):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(in_dim, out_dim), nn.ReLU(inplace=True), nn.Linear(out_dim, out_dim))
+        self.out_dim = out_dim
+
+    def forward(self, x: torch.Tensor, frame_valid: torch.Tensor) -> torch.Tensor:
+        return self.net(x) * frame_valid.unsqueeze(-1).to(x.dtype)
+
+
 def sinusoidal_positions(length: int, dim: int, device, dtype) -> torch.Tensor:
     position = torch.arange(length, device=device, dtype=torch.float32).unsqueeze(1)
     div = torch.exp(torch.arange(0, dim, 2, device=device, dtype=torch.float32) * (-math.log(10000.0) / dim))
@@ -426,9 +439,10 @@ def stage1_kwargs_from_state_dict(state_dict: dict) -> dict:
         return {"frontend": "vit"}
     layers = {int(k.split(".")[2]) for k in state_dict if k.startswith("backend.layers.")}
     return {
-        "frontend": "resnet",
+        "frontend": "audio" if "frontend.net.0.weight" in state_dict else "resnet",
         "backend_dim": int(state_dict["frontend_proj.weight"].shape[0]),
         "backend_layers": len(layers),
+        "audio_head": "audio_head.weight" in state_dict,
     }
 
 
@@ -466,28 +480,32 @@ class VALLR(nn.Module):
         vit_mask_ratio: float = 0.0,  # 0.0 default for supervised mode
         spatial_pool_tokens: Optional[Tuple[int, int]] = None,
 
-        # "vit" (spatiotemporal ViT above) or "resnet" (3D-CNN + ResNet-18 + temporal transformer)
+        # "vit" (spatiotemporal ViT above), "resnet" (3D-CNN + ResNet-18 + temporal transformer) or "audio"
+        # (per-frame log-mel + the same temporal transformer; a check that the labels are learnable)
         frontend: str = "vit",
         backend_dim: int = 256,
         backend_layers: int = 6,
         backend_dropout: float = 0.1,
+        audio_head: bool = False,  # resnet only: also predict each frame's audio features (audio-guided training)
     ):
         super().__init__()
-        if frontend not in ("vit", "resnet"):
-            raise ValueError(f"frontend must be 'vit' or 'resnet', got {frontend!r}")
+        if frontend not in ("vit", "resnet", "audio"):
+            raise ValueError(f"frontend must be 'vit', 'resnet' or 'audio', got {frontend!r}")
         self.frontend_type = frontend
+        self.last_audio_pred = None
         self.temporal_upsample_factor = temporal_upsample_factor
         self.patch_size = patch_size
         self.tubelet_size = tubelet_size
         self.img_size = img_size
         self.spatial_pool_tokens = spatial_pool_tokens
 
-        if frontend == "resnet":
+        if frontend in ("resnet", "audio"):
             if temporal_upsample_factor % tubelet_size != 0:
-                raise ValueError("--temporal_upsample_factor must be a multiple of the tubelet size (2) for the resnet front end")
+                raise ValueError("--temporal_upsample_factor must be a multiple of the tubelet size (2) for this front end")
             # Per-frame features, so the adapter upsamples by factor/tubelet to keep the same CTC length
             # (ceil(frames / tubelet) * factor) that the dataset and collate already assume.
-            self.frontend = LipResNetFrontend()
+            self.frontend = LipResNetFrontend() if frontend == "resnet" else AudioFrameFrontend()
+            self.audio_head = nn.Linear(backend_dim, 320) if (audio_head and frontend == "resnet") else None
             self.frontend_proj = nn.Linear(self.frontend.out_dim, backend_dim)
             layer = nn.TransformerEncoderLayer(
                 d_model=backend_dim, nhead=max(1, backend_dim // 64), dim_feedforward=4 * backend_dim,
@@ -503,7 +521,8 @@ class VALLR(nn.Module):
             self.ctc_head = nn.Linear(ctc_hidden_size, num_classes)
             # Kaiming init for the CNN parts; the transformer and CTC head keep PyTorch's default init.
             for part in (self.frontend, self.temporal_adapter, self.adapter):
-                part.apply(self._init_weights)
+                if frontend == "resnet" or part is not self.frontend:
+                    part.apply(self._init_weights)
             return
 
         # 1) Spatiotemporal ViT backbone producing tokens (B, N, D)
@@ -585,6 +604,9 @@ class VALLR(nn.Module):
             logits  : (B, T_ctc, num_classes)
             adapted : (B, T_ctc, ctc_hidden_size)
         """
+        if self.frontend_type == "audio":
+            return self._forward_audio(video_inputs, video_lengths)
+
         # Normalize layout to (B, C, T, H, W)
         if video_inputs.ndim != 5:
             raise ValueError(f"Expected 5D input, got shape {video_inputs.shape}")
@@ -660,8 +682,16 @@ class VALLR(nn.Module):
 
         return logits, adapted
 
-    def _forward_resnet(self, vid: torch.Tensor, video_lengths: Optional[torch.Tensor]):
-        B, _, T = vid.shape[:3]  # T is already a tubelet multiple
+    def _forward_audio(self, feats: torch.Tensor, video_lengths: Optional[torch.Tensor]):
+        if feats.ndim != 3:
+            raise ValueError(f"The audio front end expects (B, T, 320) features, got {tuple(feats.shape)}")
+        T = feats.size(1)
+        if T % self.tubelet_size:
+            feats = F.pad(feats, (0, 0, 0, self.tubelet_size - T % self.tubelet_size))
+        return self._forward_resnet(feats, video_lengths, frames_axis=1)
+
+    def _forward_resnet(self, vid: torch.Tensor, video_lengths: Optional[torch.Tensor], frames_axis: int = 2):
+        B, T = vid.size(0), vid.size(frames_axis)  # T is already a tubelet multiple
         device = vid.device
         if video_lengths is None:
             frames = torch.full((B,), T, device=device, dtype=torch.long)
@@ -679,6 +709,7 @@ class VALLR(nn.Module):
         h = h * step_frames.unsqueeze(-1).to(h.dtype)
         h = self.backend(h, src_key_padding_mask=~step_frames)
         h = self.backend_norm(h) * step_frames.unsqueeze(-1).to(h.dtype)
+        self.last_audio_pred = self.audio_head(h) if self.audio_head is not None else None  # (B, T, 320)
 
         adapted_temp = self.temporal_adapter(h.transpose(1, 2), valid_lengths=valid_frames)  # (B, A, T*up)
         adapted_temp = adapted_temp.transpose(1, 2)

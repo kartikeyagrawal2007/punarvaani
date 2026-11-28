@@ -32,7 +32,7 @@ class TestResNetFrontend(unittest.TestCase):
     def test_checkpoint_rebuilds_the_same_architecture(self):
         state = _tiny().state_dict()
         kwargs = stage1_kwargs_from_state_dict(state)
-        self.assertEqual(kwargs, {"frontend": "resnet", "backend_dim": 64, "backend_layers": 1})
+        self.assertEqual(kwargs, {"frontend": "resnet", "backend_dim": 64, "backend_layers": 1, "audio_head": False})
         VALLR(num_classes=12, **kwargs).load_state_dict(state)
         vit = VALLR(num_classes=12, feature_size=32, vit_depth=1, vit_heads=4).state_dict()
         self.assertEqual(stage1_kwargs_from_state_dict(vit), {"frontend": "vit"})

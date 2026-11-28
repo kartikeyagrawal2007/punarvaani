@@ -54,6 +54,7 @@ class VSRItem:
     text: str
     speaker_id: str
     num_frames: int
+    audio: Optional[torch.Tensor] = None  # (T, 320) per-frame log-mel (4 x 80), normalised per clip
 
 
 @dataclass
@@ -67,6 +68,7 @@ class VSRBatch:
     input_lengths: Optional[torch.Tensor]   # (B,)
     valid_mask: Optional[torch.Tensor]      # (B,) bool
     dropped: int = 0
+    audio: Optional[torch.Tensor] = None    # (B, T_max, 320) when the dataset loads audio features
 
     def __len__(self) -> int:
         return 0 if self.videos is None else int(self.videos.size(0))
@@ -150,7 +152,11 @@ class HindiVideoDataset(Dataset):
         validate_ctc: bool = True,
         tubelet_size: int = 2,
         temporal_upsample_factor: int = 4,
+        load_audio: bool = False,
+        audio_only: bool = False,
     ):
+        self.load_audio = bool(load_audio) or bool(audio_only)
+        self.audio_only = bool(audio_only)  # skip decoding video (audio-only model): much faster
         self.data_dir = data_dir
         self.phoneme_vocab = phoneme_vocab
         self.split = split
@@ -415,18 +421,56 @@ class HindiVideoDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Optional[VSRItem]:
         sample = self.samples[idx]
+        if self.audio_only:
+            n = self.num_frames or self.max_frames
+            audio = load_audio_features(sample["video"], None, max_frames=n)
+            if audio is None:
+                return None
+            return VSRItem(
+                video=torch.zeros(len(audio), 1, 1, 1),  # placeholder: the audio model never reads it
+                phoneme_ids=sample["label"].clone(),
+                text=sample["text"],
+                speaker_id=sample["speaker"] or "",
+                num_frames=len(audio),
+                audio=audio,
+            )
         frames_np = self._load_video_frames(sample["video"])
         if frames_np is None:
             return None
 
         video = torch.from_numpy(frames_np).permute(0, 3, 1, 2).float() / 255.0
+        audio = None
+        if self.load_audio:
+            audio = load_audio_features(sample["video"], int(video.size(0)))
+            if audio is None:
+                return None  # no .audio.npy for this clip (run scripts/extract_audio.py)
         return VSRItem(
             video=video,
             phoneme_ids=sample["label"].clone(),
             text=sample["text"],
             speaker_id=sample["speaker"] or "",
             num_frames=int(video.size(0)),
+            audio=audio,
         )
+
+
+def load_audio_features(video_path: str, num_frames: Optional[int], max_frames: int = 96) -> Optional[torch.Tensor]:
+    """<clip>.audio.npy (frames, 4, 80) -> (num_frames, 320) float, normalised per clip (zero mean, unit
+    variance per band), zero-padded if the audio is a frame or two short. ``num_frames`` None = as many frames
+    as the file has (at most ``max_frames``). None when the file is missing."""
+    path = os.path.splitext(video_path)[0] + ".audio.npy"
+    if not os.path.exists(path):
+        return None
+    feats = np.load(path).astype(np.float32)
+    if num_frames is None:
+        num_frames = min(len(feats), max_frames)
+    feats = feats.reshape(feats.shape[0], -1)[:num_frames]
+    bands = feats.reshape(-1, 80)
+    mean, std = bands.mean(axis=0), bands.std(axis=0) + 1e-5
+    feats = ((feats.reshape(len(feats), -1, 80) - mean) / std).reshape(len(feats), -1)
+    if len(feats) < num_frames:
+        feats = np.concatenate([feats, np.zeros((num_frames - len(feats), feats.shape[1]), np.float32)])
+    return torch.from_numpy(feats)
 
 
 def custom_collate(
@@ -445,11 +489,13 @@ def custom_collate(
     items = [item for item in batch if item is not None]
     prepared: List[dict] = []
     for item in items:
+        audio = None
         if isinstance(item, VSRItem):
             video = item.video
             label = item.phoneme_ids
             text = item.text
             num_frames = item.num_frames
+            audio = item.audio
         else:
             video, label, text = item[0], item[1], item[2]
             num_frames = int(video.size(0))
@@ -468,6 +514,7 @@ def custom_collate(
                     "text": text,
                     "input_length": input_length,
                     "num_frames": num_frames,
+                    "audio": audio,
                 }
             )
 
@@ -488,6 +535,12 @@ def custom_collate(
         video_lengths[i] = frames
         input_lengths[i] = min(item["input_length"], max_input_length)
 
+    audio = None
+    if all(item["audio"] is not None for item in prepared):
+        audio = torch.zeros(len(prepared), max_frames, prepared[0]["audio"].size(1))
+        for i, item in enumerate(prepared):
+            audio[i, : item["num_frames"]] = item["audio"][: item["num_frames"]]
+
     return VSRBatch(
         videos=videos,
         labels=[item["label"].clone().detach() for item in prepared],
@@ -496,6 +549,7 @@ def custom_collate(
         input_lengths=input_lengths,
         valid_mask=torch.ones(len(prepared), dtype=torch.bool),
         dropped=dropped,
+        audio=audio,
     )
 
 

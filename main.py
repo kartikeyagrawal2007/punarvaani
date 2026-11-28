@@ -53,6 +53,7 @@ def _model_kwargs(args, num_classes: int):
         frontend=getattr(args, "frontend", "vit"),
         backend_dim=getattr(args, "backend_dim", 256),
         backend_layers=getattr(args, "backend_layers", 6),
+        audio_head=getattr(args, "audio_weight", 0.0) > 0,
     )
 
 
@@ -138,9 +139,32 @@ def load_finetuned_model(model_path, device, num_classes, args=None, **model_kwa
 # =============================================================================
 # Training
 # =============================================================================
-def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_vocab, scheduler=None):
+def _model_input(model, batch, device):
+    """The audio-only model reads the per-frame audio features; every other model reads the video."""
+    if getattr(model, "frontend_type", "vit") == "audio":
+        if batch.audio is None:
+            raise RuntimeError("The audio model needs .audio.npy files next to the clips (scripts/extract_audio.py)")
+        return batch.audio.to(device)
+    return batch.videos.to(device)
+
+
+def _audio_prediction_loss(model, batch, video_lengths, device):
+    """Masked L1 between the lip model's predicted and the real per-frame audio features."""
+    pred = model.last_audio_pred
+    if pred is None or batch.audio is None:
+        return None
+    target = batch.audio.to(device)
+    T = target.size(1)
+    valid = (torch.arange(T, device=device).unsqueeze(0) < video_lengths.unsqueeze(1)).unsqueeze(-1)
+    err = (pred[:, :T].float() - target).abs() * valid
+    return err.sum() / (valid.sum() * target.size(2)).clamp(min=1)
+
+
+def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_vocab, scheduler=None,
+                    audio_weight: float = 0.0):
     model.train()
     running_loss = 0.0
+    running_audio = 0.0
     total_edits = 0
     total_ref_phonemes = 0
     valid_batches = 0
@@ -154,32 +178,35 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
         if batch.videos is None or len(batch) == 0 or not batch.labels:
             continue
 
-        videos = batch.videos.to(device)
+        inputs = _model_input(model, batch, device)
         video_lengths = batch.video_lengths.to(device)
         labels = [label.to(device) for label in batch.labels]
 
         optimizer.zero_grad(set_to_none=True)
         with context:
-            raw_logits, _ = model(videos, video_lengths=video_lengths)
+            raw_logits, _ = model(inputs, video_lengths=video_lengths)
             loss = _ctc_loss(criterion, raw_logits, labels, batch.input_lengths, device)
+        audio_loss = _audio_prediction_loss(model, batch, video_lengths, device) if audio_weight > 0 else None
 
         if not torch.isfinite(loss) or loss.item() < 0:
             continue
+        total = loss if audio_loss is None else loss + audio_weight * audio_loss
 
         if scaler is not None:
-            scaler.scale(loss).backward()
+            scaler.scale(total).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             scaler.step(optimizer)
             scaler.update()
         else:
-            loss.backward()
+            total.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             optimizer.step()
         if scheduler is not None:
             scheduler.step_batch()  # warmup is counted in optimizer steps, not epochs
 
         running_loss += loss.item()
+        running_audio += audio_loss.item() if audio_loss is not None else 0.0
         valid_batches += 1
 
         predicted_strings = ML_VALLR.decode_ctc(raw_logits.detach(), phoneme_vocab)
@@ -195,6 +222,8 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
 
     avg_loss = running_loss / max(1, valid_batches)
     per = (total_edits / total_ref_phonemes * 100.0) if total_ref_phonemes else 100.0
+    if audio_weight > 0:
+        print(f"  Audio-prediction L1 (train): {running_audio / max(1, valid_batches):.4f}")
     return avg_loss, per, dropped
 
 
@@ -214,11 +243,11 @@ def validate_one_epoch(model, dataloader, criterion, device, phoneme_vocab):
             if batch.videos is None or len(batch) == 0 or not batch.labels:
                 continue
 
-            videos = batch.videos.to(device)
+            inputs = _model_input(model, batch, device)
             video_lengths = batch.video_lengths.to(device)
             labels = [label.to(device) for label in batch.labels]
 
-            raw_logits, _ = model(videos, video_lengths=video_lengths)
+            raw_logits, _ = model(inputs, video_lengths=video_lengths)
             loss = _ctc_loss(criterion, raw_logits, labels, batch.input_lengths, device)
             if torch.isfinite(loss):
                 running_loss += loss.item()
@@ -258,6 +287,8 @@ def _make_dataset(args, vocab, split: str, data_dir: str, is_dedicated: bool):
         strict_ctc=args.strict_ctc,
         tubelet_size=2,
         temporal_upsample_factor=args.temporal_upsample_factor,
+        load_audio=getattr(args, "audio_weight", 0.0) > 0,
+        audio_only=getattr(args, "frontend", "vit") == "audio",
     )
 
 
@@ -317,7 +348,8 @@ def train(args, device, vocab):
     print(f" Target Classes: {len(vocab)} phonemes")
     print(f" Frames: {'all up to ' + str(args.max_frames) if not args.num_frames else args.num_frames}")
     print(f" Crop mode: {resolve_crop_mode(args)}")
-    print(f" Video encoder: {getattr(args, 'frontend', 'vit')}")
+    print(f" Video encoder: {getattr(args, 'frontend', 'vit')}"
+          + (f" (+ audio prediction, weight {args.audio_weight})" if getattr(args, "audio_weight", 0.0) > 0 else ""))
     print(f" Checkpoint Target: {save_path}")
     print("==========================================\n")
 
@@ -383,7 +415,8 @@ def train(args, device, vocab):
             print(f" Curriculum: epoch {epoch} trains on the {len(keep)} shortest clips "
                   f"({100.0 * len(keep) / len(train_dataset):.0f}%)")
         train_loss, train_per, train_dropped = train_one_epoch(
-            model, epoch_loader, optimizer, criterion, device, vocab, scheduler
+            model, epoch_loader, optimizer, criterion, device, vocab, scheduler,
+            audio_weight=getattr(args, "audio_weight", 0.0),
         )
         val_loss, val_per, val_dropped = validate_one_epoch(
             model, val_loader, criterion, device, vocab

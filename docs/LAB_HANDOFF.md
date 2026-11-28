@@ -229,6 +229,13 @@ Eval and infer read the architecture from the checkpoint, so their commands stay
 
 **Getting past the CTC plateau.** Every model first sits at a train loss of about 2.9-3.0 (it outputs the common phonemes) until it learns when each sound happens. On the full 17-hour corpus no run left that stage in 30 epochs, but on 207 clips (`--sample_size 0.01`, same clips as val, 150 epochs, `--min_lr 3e-4 --warmup_steps 50`) the ResNet front end broke through around epoch 60-75 and memorised them (val PER 4.7%, 2026-11-27). `--init_from <that checkpoint>` starts a new full run from those weights, with a fresh optimizer and LR schedule.
 
+**Audio: a label check and a dense training signal.** `scripts/extract_audio.py` writes `<clip>.audio.npy` next to every crop: four 10 ms log-mel frames (80 bands) per video frame, read from the raw clip's sound, so audio frame i lines up with video frame i. Run it once per split (needs ffmpeg on PATH, e.g. with the `punarvaani` conda env active):
+```powershell
+python scripts\extract_audio.py --input_dir $HOME\Desktop\punarvaani-data\dataset\splits\train --output_dir E:\punarvaani_data\full_cropped_v2\train --skip_existing
+```
+- `--frontend audio` trains the same Stage-1 model on the clips' sound with the same labels (video is not decoded, so it is fast). Learning phonemes from audio is far easier than from lips: if even this stays at the CTC plateau (train loss ~2.9), the transcripts do not match the clips; if it learns, the labels are fine and lip reading itself is the hard part.
+- `--frontend resnet --audio_weight 1.0` adds audio-guided lip training (as in LiRA, Ma et al. 2021): the lip model also predicts each frame's audio features, a dense per-frame target from the clip's own sound, on top of CTC. The training log prints the audio-prediction L1 each epoch.
+
 **Resuming after a shutdown.** After every epoch, training writes `<save_model_path minus .pth>_last.pt` (for example `stage1_full_last.pt`) with the model, optimizer, LR schedule, epoch and best val PER. If the PC restarts, run the same command again with `--resume` added: it prints `Resuming from ...` and continues at the next epoch. The epoch that was running when the PC went off is lost. To train longer than planned, rerun with `--resume` and a larger `--epochs`. The best model is still saved to `--save_model_path`, so eval and infer commands don't change.
 
 ### 7.6 Eval + infer
