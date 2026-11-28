@@ -58,8 +58,9 @@ def load_args():
     parser.add_argument('--strict_ctc', action='store_true', help="Raise instead of warning when too many samples violate the CTC length constraint")
     parser.add_argument('--init_from', type=str, default=None,
                         help="Start a NEW run from these Stage-1 weights (a .pth best model or a _last.pt), e.g. a "
-                             "model that already got past the CTC plateau on a small subset. Ignored when --resume "
-                             "finds this run's own _last.pt")
+                             "model that already got past the CTC plateau on a small subset. From an audio model, a "
+                             "lip model copies everything but the front end. Ignored when --resume finds this run's "
+                             "own _last.pt")
     parser.add_argument('--resume', action='store_true',
                         help="Continue training from <save_model_path>_last.pt (written after every epoch) instead of epoch 1")
 
@@ -72,6 +73,12 @@ def load_args():
                              "transformer, the standard lip-reading front end) or 'audio' (the clips' own sound with "
                              "the same labels: a check that the transcripts can be learned; needs .audio.npy files "
                              "from scripts/extract_audio.py)")
+    parser.add_argument('--teacher_path', type=str, default=None,
+                        help="An audio-only Stage-1 checkpoint (--frontend audio) used as a teacher: the lip model "
+                             "also learns to match its per-step phoneme probabilities on each clip's sound, which "
+                             "carries the timing CTC alone cannot find (cross-modal distillation)")
+    parser.add_argument('--distill_weight', type=float, default=1.0,
+                        help="Weight of the teacher-matching loss against CTC (with --teacher_path)")
     parser.add_argument('--audio_weight', type=float, default=0.0,
                         help="resnet only: also train the lip model to predict each frame's audio features (from "
                              "scripts/extract_audio.py), weighted this much against CTC. A dense per-frame signal "

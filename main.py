@@ -160,11 +160,32 @@ def _audio_prediction_loss(model, batch, video_lengths, device):
     return err.sum() / (valid.sum() * target.size(2)).clamp(min=1)
 
 
+def _distill_loss(student_logits, teacher_logits, input_lengths, device):
+    """KL(teacher || student) per CTC step, averaged over the real steps of each clip."""
+    T = min(student_logits.size(1), teacher_logits.size(1))
+    s = student_logits[:, :T].float().log_softmax(-1)
+    t = teacher_logits[:, :T].float().softmax(-1)
+    kl = (t * (t.clamp(min=1e-8).log() - s)).sum(-1)  # (B, T)
+    valid = torch.arange(T, device=device).unsqueeze(0) < input_lengths.to(device).unsqueeze(1)
+    return (kl * valid).sum() / valid.sum().clamp(min=1)
+
+
+def load_teacher(path, device, num_classes, args):
+    """A frozen audio-only Stage-1 model."""
+    teacher = load_finetuned_model(path, device, num_classes, args=args)
+    if getattr(teacher, "frontend_type", "") != "audio":
+        raise ValueError(f"--teacher_path must be an audio model (--frontend audio), got {teacher.frontend_type}")
+    for p in teacher.parameters():
+        p.requires_grad_(False)
+    return teacher.eval()
+
+
 def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_vocab, scheduler=None,
-                    audio_weight: float = 0.0):
+                    audio_weight: float = 0.0, teacher=None, distill_weight: float = 1.0):
     model.train()
     running_loss = 0.0
     running_audio = 0.0
+    running_distill = 0.0
     total_edits = 0
     total_ref_phonemes = 0
     valid_batches = 0
@@ -187,10 +208,19 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
             raw_logits, _ = model(inputs, video_lengths=video_lengths)
             loss = _ctc_loss(criterion, raw_logits, labels, batch.input_lengths, device)
         audio_loss = _audio_prediction_loss(model, batch, video_lengths, device) if audio_weight > 0 else None
+        distill = None
+        if teacher is not None:
+            if batch.audio is None:
+                raise RuntimeError("--teacher_path needs .audio.npy files next to the clips (scripts/extract_audio.py)")
+            with torch.no_grad(), context:
+                teacher_logits, _ = teacher(batch.audio.to(device), video_lengths=video_lengths)
+            distill = _distill_loss(raw_logits, teacher_logits, batch.input_lengths, device)
 
         if not torch.isfinite(loss) or loss.item() < 0:
             continue
         total = loss if audio_loss is None else loss + audio_weight * audio_loss
+        if distill is not None and torch.isfinite(distill):
+            total = total + distill_weight * distill
 
         if scaler is not None:
             scaler.scale(total).backward()
@@ -207,6 +237,7 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
 
         running_loss += loss.item()
         running_audio += audio_loss.item() if audio_loss is not None else 0.0
+        running_distill += distill.item() if distill is not None else 0.0
         valid_batches += 1
 
         predicted_strings = ML_VALLR.decode_ctc(raw_logits.detach(), phoneme_vocab)
@@ -224,6 +255,8 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, phoneme_voc
     per = (total_edits / total_ref_phonemes * 100.0) if total_ref_phonemes else 100.0
     if audio_weight > 0:
         print(f"  Audio-prediction L1 (train): {running_audio / max(1, valid_batches):.4f}")
+    if teacher is not None:
+        print(f"  Teacher KL (train): {running_distill / max(1, valid_batches):.4f}")
     return avg_loss, per, dropped
 
 
@@ -287,7 +320,7 @@ def _make_dataset(args, vocab, split: str, data_dir: str, is_dedicated: bool):
         strict_ctc=args.strict_ctc,
         tubelet_size=2,
         temporal_upsample_factor=args.temporal_upsample_factor,
-        load_audio=getattr(args, "audio_weight", 0.0) > 0,
+        load_audio=getattr(args, "audio_weight", 0.0) > 0 or bool(getattr(args, "teacher_path", None)),
         audio_only=getattr(args, "frontend", "vit") == "audio",
     )
 
@@ -367,6 +400,10 @@ def train(args, device, vocab):
 
     model = ML_VALLR(**_model_kwargs(args, len(vocab))).to(device)
     criterion = nn.CTCLoss(blank=vocab["<pad>"], reduction="mean", zero_infinity=True)
+    teacher = None
+    if getattr(args, "teacher_path", None):
+        teacher = load_teacher(args.teacher_path, device, len(vocab), args)
+        print(f" Teacher: {args.teacher_path} (audio model; distill weight {getattr(args, 'distill_weight', 1.0)})")
 
     peak_lr = getattr(args, "lr", 1e-4)
     optimizer = torch.optim.AdamW(model.parameters(), lr=peak_lr, weight_decay=1e-4)
@@ -402,8 +439,20 @@ def train(args, device, vocab):
             raise FileNotFoundError(f"--init_from: no file at {init_from}")
         weights = torch.load(init_from, map_location=device, weights_only=False)
         weights = weights.get("model", weights) if isinstance(weights, dict) else weights
-        model.load_state_dict(weights)
-        print(f" Starting from the weights in {init_from} (new optimizer and LR schedule)")
+        src_frontend = stage1_kwargs_from_state_dict(weights)["frontend"]
+        if src_frontend == model.frontend_type:
+            model.load_state_dict(weights)
+            print(f" Starting from the weights in {init_from} (new optimizer and LR schedule)")
+        elif src_frontend in ("audio", "resnet") and model.frontend_type in ("audio", "resnet"):
+            # e.g. an audio model -> a lip model: copy the temporal transformer, adapter and phoneme head, so the
+            # new front end only has to learn features the trained back half already understands.
+            shared = {k: v for k, v in weights.items()
+                      if not k.startswith(("frontend.", "audio_head.")) and k in model.state_dict()}
+            model.load_state_dict(shared, strict=False)
+            print(f" Copied the temporal model and phoneme head ({len(shared)} tensors) from the {src_frontend} model "
+                  f"{init_from}; the {model.frontend_type} front end starts from scratch")
+        else:
+            raise ValueError(f"--init_from: cannot start a {model.frontend_type} model from a {src_frontend} model")
     if start_epoch > args.epochs:
         print(f" Already trained {start_epoch - 1} epochs (--epochs {args.epochs}); raise --epochs to continue.")
 
@@ -417,6 +466,7 @@ def train(args, device, vocab):
         train_loss, train_per, train_dropped = train_one_epoch(
             model, epoch_loader, optimizer, criterion, device, vocab, scheduler,
             audio_weight=getattr(args, "audio_weight", 0.0),
+            teacher=teacher, distill_weight=getattr(args, "distill_weight", 1.0),
         )
         val_loss, val_per, val_dropped = validate_one_epoch(
             model, val_loader, criterion, device, vocab

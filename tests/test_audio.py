@@ -77,6 +77,36 @@ class TestAudioModel(unittest.TestCase):
         self.assertAlmostEqual(loss.item(), 2 / 5)  # 2 wrong frames out of 5 real ones
 
 
+class TestDistillation(unittest.TestCase):
+    def test_distill_loss_is_zero_for_a_perfect_copy_and_ignores_padding(self):
+        from main import _distill_loss
+
+        teacher = torch.randn(2, 6, 12)
+        self.assertAlmostEqual(_distill_loss(teacher, teacher, torch.tensor([6, 4]), torch.device("cpu")).item(), 0.0,
+                               places=5)
+        student = teacher.clone()
+        student[1, 4:] = torch.randn(2, 12) * 5  # only padded steps of clip 1 differ
+        self.assertAlmostEqual(_distill_loss(student, teacher, torch.tensor([6, 4]), torch.device("cpu")).item(), 0.0,
+                               places=5)
+        student[0, 0] = torch.randn(12) * 5
+        self.assertGreater(_distill_loss(student, teacher, torch.tensor([6, 4]), torch.device("cpu")).item(), 0.0)
+
+    def test_teacher_must_be_an_audio_model(self):
+        from main import load_teacher
+
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "lip.pth")
+            torch.save(VALLR(num_classes=12, frontend="resnet", backend_dim=64, backend_layers=1).state_dict(), path)
+            args = SimpleNamespace(temporal_upsample_factor=4, vit_embed_dim=32, vit_depth=1, vit_heads=4,
+                                   spatial_pool_tokens="none", frontend="resnet", backend_dim=64, backend_layers=1,
+                                   audio_weight=0.0)
+            with self.assertRaises(ValueError):
+                load_teacher(path, torch.device("cpu"), 12, args)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 @unittest.skipUnless(os.environ.get("RUN_SLOW") == "1", "set RUN_SLOW=1 to run")
 class TestAudioTrainingE2E(unittest.TestCase):
     def test_audio_only_and_audio_guided_training(self):
@@ -111,6 +141,21 @@ class TestAudioTrainingE2E(unittest.TestCase):
             train(lip_args, dev, vocab)
             state = torch.load(os.path.join(tmp, "lip.pth"), weights_only=True)
             self.assertIn("audio_head.weight", state)
+            student = SimpleNamespace(**base, frontend="resnet", audio_weight=0.0,
+                                      teacher_path=os.path.join(tmp, "audio.pth"), distill_weight=1.0,
+                                      save_model_path=os.path.join(tmp, "student.pth"))
+            train(student, dev, vocab)
+            self.assertNotIn("audio_head.weight", torch.load(os.path.join(tmp, "student.pth"), weights_only=True))
+
+            # Starting a lip model from the audio model copies everything but the front end.
+            from main import ML_VALLR, _model_kwargs  # noqa: F401
+            warm = SimpleNamespace(**base, frontend="resnet", audio_weight=0.0, teacher_path=None,
+                                   save_model_path=os.path.join(tmp, "warm.pth"))
+            warm.init_from, warm.epochs, warm.lr = os.path.join(tmp, "audio.pth"), 1, 1e-12
+            train(warm, dev, vocab)
+            a = torch.load(os.path.join(tmp, "audio.pth"), weights_only=True)
+            w = torch.load(os.path.join(tmp, "warm_last.pt"), weights_only=False)["model"]
+            self.assertTrue(torch.allclose(a["ctc_head.weight"], w["ctc_head.weight"], atol=1e-6))
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
